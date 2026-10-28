@@ -57,12 +57,14 @@
 
   // Batting and bowling totals per player across finished matches.
   function leaders(matches) {
-    const bat = new Map(), bowl = new Map();
+    const bat = new Map(), bowl = new Map(), scores = [], figures = [];
     for (const m of matches) {
       const sm = m.summary;
       if (m.status !== "done" || !sm) continue;
       const teamIds = [m.team1_id, m.team2_id];
+      const vs = (team) => teamIds[1 - team];
       for (const b of sm.bat) {
+        if (b.balls || b.runs || b.out) scores.push({ id: b.id, name: b.name, teamId: teamIds[b.team], vsId: vs(b.team), matchId: m.id, runs: b.runs, balls: b.balls, out: b.out });
         const k = keyOf(b, teamIds[b.team]);
         const x = bat.get(k) || { key: k, id: b.id, name: b.name, teamId: teamIds[b.team], inns: 0, runs: 0, balls: 0, fours: 0, sixes: 0, outs: 0, best: 0, bestOut: true, fifties: 0, hundreds: 0 };
         x.name = b.name; x.inns++; x.runs += b.runs; x.balls += b.balls; x.fours += b.fours; x.sixes += b.sixes;
@@ -72,6 +74,7 @@
         bat.set(k, x);
       }
       for (const b of sm.bowl) {
+        if (b.balls) figures.push({ id: b.id, name: b.name, teamId: teamIds[b.team], vsId: vs(b.team), matchId: m.id, wickets: b.wickets, runs: b.runs, overs: E.oversText(b.balls, sm.bpo || 6) });
         const k = keyOf(b, teamIds[b.team]);
         const x = bowl.get(k) || { key: k, id: b.id, name: b.name, teamId: teamIds[b.team], inns: 0, balls: 0, runs: 0, wickets: 0, bestW: -1, bestR: 0, bpo: sm.bpo || 6 };
         x.name = b.name; x.inns++; x.balls += b.balls; x.runs += b.runs; x.wickets += b.wickets;
@@ -85,7 +88,12 @@
     const wickets = [...bowl.values()].filter((x) => x.balls > 0).map((x) => Object.assign(x, {
       econ: (x.runs * x.bpo) / x.balls, overs: E.oversText(x.balls, x.bpo),
     })).sort((a, b) => b.wickets - a.wickets || a.econ - b.econ);
-    return { runs, wickets };
+    // Single-innings records: highest scores (not-out first on a tie) and best bowling figures.
+    scores.sort((a, b) => b.runs - a.runs || Number(a.out) - Number(b.out) || a.balls - b.balls);
+    figures.sort((a, b) => b.wickets - a.wickets || a.runs - b.runs);
+    const sixes = runs.filter((x) => x.sixes > 0).slice().sort((a, b) => b.sixes - a.sixes || b.runs - a.runs);
+    const fours = runs.filter((x) => x.fours > 0).slice().sort((a, b) => b.fours - a.fours || b.runs - a.runs);
+    return { runs, wickets, scores, figures: figures.filter((x) => x.wickets > 0), sixes, fours };
   }
 
   const api = { summarize, pointsTable, leaders };

@@ -57,3 +57,22 @@ test("leaders add up across matches", () => {
   assert.equal(L.wickets[0].wickets, 6);
   assert.equal(L.wickets[0].bestW, 3);
 });
+
+test("records list single innings: highest scores, best figures, sixes", () => {
+  const sm = (bat, bowl) => ({ v: 1, maxBalls: 60, bpo: 6, innings: [], bat, bowl });
+  const ms = [
+    { id: "m1", team1_id: "A", team2_id: "B", status: "done", summary: sm(
+      [{ id: "p1", name: "One", team: 0, runs: 70, balls: 40, fours: 5, sixes: 4, out: true }, { id: "p2", name: "Two", team: 1, runs: 70, balls: 50, fours: 8, sixes: 0, out: false }],
+      [{ id: "p3", name: "Three", team: 1, balls: 24, runs: 20, wickets: 3 }, { id: "p4", name: "Four", team: 0, balls: 12, runs: 30, wickets: 0 }]) },
+    { id: "m2", team1_id: "A", team2_id: "B", status: "done", summary: sm(
+      [{ id: "p1", name: "One", team: 0, runs: 12, balls: 6, fours: 0, sixes: 2, out: true }],
+      [{ id: "p3", name: "Three", team: 1, balls: 24, runs: 15, wickets: 3 }]) },
+    { id: "m3", team1_id: "A", team2_id: "B", status: "live", summary: sm([{ id: "p9", name: "Live", team: 0, runs: 200, balls: 50, fours: 0, sixes: 30, out: false }], []) },
+  ];
+  const L = St.leaders(ms);
+  assert.deepEqual(L.scores.map((x) => [x.id, x.runs, x.out]), [["p2", 70, false], ["p1", 70, true], ["p1", 12, true]]);
+  assert.equal(L.scores[0].vsId, "A");
+  assert.deepEqual(L.figures.map((x) => [x.id, `${x.wickets}/${x.runs}`, x.overs, x.matchId]), [["p3", "3/15", "4.0", "m2"], ["p3", "3/20", "4.0", "m1"]]);
+  assert.deepEqual(L.sixes.map((x) => [x.id, x.sixes]), [["p1", 6]]);
+  assert.deepEqual(L.fours.map((x) => [x.id, x.fours]), [["p2", 8], ["p1", 5]]);
+});
