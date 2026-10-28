@@ -20,6 +20,16 @@ Tap **New match → Fill sample teams → Start match** to try it in under a min
 - A note pops up when someone reaches 50 or 100, or takes 3 or 5 wickets. That's where the fifty card alert will hook in.
 - Every ball is saved on the phone as soon as it's tapped.
 
+**Tournaments (needs an account):**
+
+- Sign up or sign in with email and password.
+- Create a tournament or a two-team series: name, short name, logo, overs. The card colours are picked from the logo, and you can change them.
+- Add teams with a logo, an optional group and players one per line (the first is captain).
+- Add matches (teams, stage, number, date, ground), then pick the playing players and the toss and start scoring.
+- Every ball is sent to the database in the background. With no signal it waits and sends when the phone is back online; the badge in the top bar says Synced, Saving or Offline.
+- Anyone who opens a live match without scoring rights sees the score with a Refresh button instead of the pad.
+- Quick matches still work with no account.
+
 ## How it works
 
 `js/engine.js` holds the cricket rules. A match is a list of events (`openers`, `ball`, `bowler`, `batter`, `swap`, `retire`, `end`), and every score, stat and scorecard is worked out by replaying them from the start. That keeps three things simple:
@@ -33,6 +43,10 @@ Tap **New match → Fill sample teams → Start match** to try it in under a min
 | `js/engine.js` | Cricket rules and scoring maths. No screen code, so it runs in tests too |
 | `js/app.js` | The screens: matches, new match, scoring pad, scorecard |
 | `js/store.js` | Saves matches on the phone |
+| `js/league.js` | Accounts, tournaments, teams, fixtures and syncing balls to Supabase |
+| `js/config.js` | Supabase project URL and publishable key (public by design; never put the secret key here) |
+| `vendor/supabase.js` | supabase-js 2.117.3, MIT licence |
+| `supabase/` | Database tables and security rules, with setup steps |
 | `css/app.css` | The look |
 | `sw.js`, `manifest.webmanifest` | Make it installable and work offline |
 | `tests/engine.test.js` | Rule tests |
@@ -47,8 +61,8 @@ Needs Node 18 or newer. No packages to install.
 
 ## Next
 
-1. Supabase: accounts, tournaments, teams with logos, and syncing these events to the database.
-2. Live score link for spectators.
-3. Points table, leaderboards and a screen for fixing old balls.
+1. Live score link for spectators.
+2. Points table, leaderboards and a screen for fixing old balls.
+3. Scorer invites, so an organiser can let a friend score.
 4. Milestone cards and alerts.
 5. Wrap as an Android APK with Capacitor.
