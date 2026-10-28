@@ -160,9 +160,10 @@
     return [hex(order[0].x), far ? hex(far.x) : "#111111"];
   }
 
-  async function uploadLogo(blob) {
+  // Files go in a folder named after the uploader (the storage rules require it).
+  async function upload(bucket, blob) {
     const path = `${L.user.id}/${crypto.randomUUID()}.png`;
-    const { error } = await sb.storage.from("logos").upload(path, blob, { contentType: "image/png", upsert: false });
+    const { error } = await sb.storage.from(bucket).upload(path, blob, { contentType: "image/png", upsert: false });
     if (error) throw error;
     return path;
   }
@@ -191,6 +192,28 @@
       <label class="field"><span>Main colour</span><input type="color" data-f="${key}.c1" data-color="${key}" value="${f.c1}"></label>
       <label class="field"><span>Second colour</span><input type="color" data-f="${key}.c2" data-color="${key}" value="${f.c2}"></label>
     </div><small class="muted">Picked from the logo automatically. Change them if you like.</small>`;
+  }
+
+  // Players typed or pasted from a spreadsheet, one per line: name, then optionally
+  // role, batting, bowling and jersey number, split by commas or tabs.
+  const ROLE_WORDS = [[/keep|wk/i, "keeper"], [/all/i, "allrounder"], [/bowl/i, "bowler"], [/bat/i, "batter"]];
+  function parsePlayers(text) {
+    const out = [];
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const cells = line.split(/\t|,|;/).map((c) => c.trim().replace(/^"|"$/g, ""));
+      const name = cells[0];
+      if (!name || name.length < 2 || /^(name|player|full name)$/i.test(name)) continue; // skips a header row
+      const p = { full_name: name.slice(0, 60) };
+      const roleCell = cells[1] || "";
+      const role = ROLE_WORDS.find(([re]) => re.test(roleCell));
+      if (role) p.role = role[1];
+      if (/^l/i.test(cells[2] || "")) p.batting_style = "left"; else if (/^r/i.test(cells[2] || "")) p.batting_style = "right";
+      if (cells[3]) p.bowling_style = cells[3].slice(0, 40);
+      const j = parseInt(cells[4], 10);
+      if (j >= 0 && j <= 999) p.jersey_no = j;
+      out.push(p);
+    }
+    return out;
   }
 
   // ---------- New tournament ----------
@@ -223,7 +246,7 @@
     if (!(overs >= 1 && overs <= 100)) { f.error = "Overs per side must be between 1 and 100."; return ui.render(); }
     f.busy = true; f.error = ""; ui.render();
     try {
-      const logo_path = f.logoBlob ? await uploadLogo(f.logoBlob) : null;
+      const logo_path = f.logoBlob ? await upload("logos", f.logoBlob) : null;
       const { data, error } = await sb.from("tournaments").insert({
         name, short_name: (f.short || "").trim() || null, kind: f.kind, logo_path,
         primary_color: f.c1, secondary_color: f.c2, overs_per_side: overs,
@@ -280,7 +303,7 @@
       const groups = {};
       for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm);
       const names = Object.keys(groups).sort();
-      body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><div class="t-row">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} players</small></span></div></li>`).join("")}</ul>`).join("")
+      body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><button class="t-row" data-act="team-open" data-id="${tm.id}">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} players</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`).join("")
         : `<p class="muted">No teams yet.${isOrganiser() ? " Add the first one." : ""}</p>`)
         + (isOrganiser() ? `<button class="btn btn-primary" data-act="team-new">Add team</button>` : "");
     } else {
@@ -375,8 +398,9 @@
     if (!L2.runs.length) return `<p class="muted">Run and wicket leaders show up after the first finished match.</p>`;
     const row = (x, i, big, small) => {
       const tm = teamById(x.teamId);
-      return `<li class="leader${i === 0 ? " leader-top" : ""}"><span class="pos">${i + 1}</span>${badge(tm)}
-        <span class="t-text"><b>${esc(x.name)}</b><small>${esc(tm.short_name)} · ${small}</small></span><span class="leader-n">${big}</span></li>`;
+      const inner = `<span class="pos">${i + 1}</span>${badge(tm)}
+        <span class="t-text"><b>${esc(x.name)}</b><small>${esc(tm.short_name)} · ${small}</small></span><span class="leader-n">${big}</span>`;
+      return `<li class="leader${i === 0 ? " leader-top" : ""}">${x.id ? `<button class="leader-btn" data-act="p-open" data-id="${x.id}">${inner}</button>` : inner}</li>`;
     };
     const runs = L2.runs.slice(0, 10).map((x, i) => row(x, i, x.runs,
       `${x.inns} inn · SR ${x.sr.toFixed(1)}${x.avg != null ? ` · Avg ${x.avg.toFixed(1)}` : ""} · Best ${x.best}${x.bestOut ? "" : "*"}`)).join("");
@@ -398,32 +422,42 @@
         ${field("Group (optional)", `<input id="team-group" data-f="teamnew.group" value="${esc(f.group || "")}" maxlength="10" placeholder="e.g. A">`)}
       </div>
       <div class="card stack-s"><span class="eyebrow">Logo and colours</span>${logoPicker(f, "teamnew")}${colorPair(f, "teamnew")}</div>
-      <div class="card stack-s">${field("Players, one per line", `<textarea id="team-players" data-f="teamnew.players" rows="8" placeholder="Captain first">${esc(f.players || "")}</textarea>`, `<span data-count>${count} players</span>. The first name is the captain.`)}</div>
+      <div class="card stack-s">${field("Players, one per line", `<textarea id="team-players" data-f="teamnew.players" rows="8" placeholder="Captain first">${esc(f.players || "")}</textarea>`, `<span data-count>${count} players</span>. The first name is the captain. You can paste rows from a spreadsheet: name, role, batting (R/L), bowling, jersey.`)}
+        <label class="btn btn-small file-btn">Import a CSV file<input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" data-csv="teamnew" hidden></label></div>
       ${status(f)}
       <button class="btn btn-primary btn-big" data-act="team-save" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Add team"}</button>
     </section>`;
   };
 
+  // Creates the players and puts them in the team, keeping the typed order: it becomes the
+  // batting order offered when a match starts.
+  async function addPlayers(teamId, players) {
+    const made = await sb.from("players").insert(players).select("id, full_name");
+    if (made.error) throw made.error;
+    const ids = players.map((p) => { const i = made.data.findIndex((x) => x.full_name === p.full_name); return made.data.splice(i, 1)[0].id; });
+    for (const [i, player_id] of ids.entries()) {
+      // One at a time so joined_at keeps the order.
+      const link = await sb.from("team_players").insert({ team_id: teamId, player_id, joined_at: new Date(Date.now() + i).toISOString() });
+      if (link.error) throw link.error;
+    }
+    return ids;
+  }
+
   async function saveTeam() {
     const f = form("teamnew");
     const name = (f.name || "").trim();
-    const players = (f.players || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    const players = parsePlayers(f.players);
     if (name.length < 2) { f.error = "Give the team a name."; return ui.render(); }
     if (players.length < 2) { f.error = "Add at least 2 players, one per line."; return ui.render(); }
     f.busy = true; f.error = ""; ui.render();
     try {
-      const logo_path = f.logoBlob ? await uploadLogo(f.logoBlob) : null;
+      const logo_path = f.logoBlob ? await upload("logos", f.logoBlob) : null;
       const team = await sb.from("teams").insert({
         name, short_name: ((f.short || "").trim() || ui.shortName(name)).slice(0, 5).toUpperCase(), logo_path,
         primary_color: f.c1, secondary_color: f.c2,
       }).select().single();
       if (team.error) throw team.error;
-      const made = await sb.from("players").insert(players.map((full_name) => ({ full_name }))).select("id, full_name");
-      if (made.error) throw made.error;
-      // Keep the typed order: it becomes the batting order offered when a match starts.
-      const ids = players.map((p) => { const i = made.data.findIndex((x) => x.full_name === p); return made.data.splice(i, 1)[0].id; });
-      const links = await sb.from("team_players").insert(ids.map((player_id) => ({ team_id: team.data.id, player_id })));
-      if (links.error) throw links.error;
+      const ids = await addPlayers(team.data.id, players);
       await sb.from("teams").update({ captain_player_id: ids[0] }).eq("id", team.data.id);
       const joined = await sb.from("tournament_teams").insert({ tournament_id: L.tour.id, team_id: team.data.id, group_name: (f.group || "").trim() || null });
       if (joined.error) throw joined.error;
@@ -789,6 +823,14 @@
   document.addEventListener("change", (ev) => {
     const t = ev.target;
     if (t.dataset.logo) pickLogo(t, form(t.dataset.logo), t.dataset.logo);
+    if (t.dataset.csv && t.files && t.files[0]) {
+      t.files[0].text().then((txt) => {
+        const f = form(t.dataset.csv), n = parsePlayers(txt).length;
+        f.players = ((f.players || "").trim() ? f.players.trim() + "\n" : "") + txt.trim();
+        ui.toast(`${n} player${n === 1 ? "" : "s"} read from the file`);
+        ui.render();
+      });
+    }
     if (t.dataset.pick && L.forms.mstart) {
       const [i, j] = t.dataset.pick.split("-").map(Number);
       L.forms.mstart.picked[i][j] = t.checked;
@@ -798,6 +840,10 @@
   document.addEventListener("submit", (ev) => {
     if (ev.target.dataset.form === "auth") { ev.preventDefault(); submitAuth(); }
   });
+
+  // Shared with squad.js (team and player pages).
+  CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, errText, shrink, upload, logoPicker, colorPair,
+    openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON };
 
   ui.render();
 })();
