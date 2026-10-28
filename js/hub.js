@@ -17,6 +17,8 @@
     ball: '<circle cx="12" cy="12" r="9"/><path d="M7.5 4.2c2 2.2 2 13.4 0 15.6M16.5 4.2c-2 2.2-2 13.4 0 15.6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
     join: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5M15 12H3"/>',
   };
   const TABS = [["home", "Home", ICON.home], ["tours", "Tournaments", ICON.trophy], ["teams", "Teams", ICON.team], ["profile", "Profile", ICON.user]];
@@ -31,10 +33,33 @@
   function top(title, right) {
     return `<header class="bar topbar"><h1>${title}</h1><span class="row-end">${right || ""}</span></header>`;
   }
+  // ---------- Day / night ----------
+  // "light" or "dark" when the user picked one; otherwise the phone's setting decides.
+  const THEME = "csa.theme";
+  const themePick = () => { try { return localStorage.getItem(THEME) || "auto"; } catch (e) { return "auto"; } };
+  const isDark = () => { const p = themePick(); return p === "dark" || (p === "auto" && matchMedia("(prefers-color-scheme: dark)").matches); };
+  function setTheme(p) {
+    try { p === "auto" ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, p); } catch (e) {}
+    if (p === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = p;
+    paintThemeColor();
+    ui.render();
+  }
+  function paintThemeColor() {
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.content = isDark() ? "#090C10" : "#0E1A14";
+  }
+  paintThemeColor();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { paintThemeColor(); ui.render(); });
+  const themeBtn = () => `<button class="icon-btn theme-btn" data-act="theme-toggle" aria-label="${isDark() ? "Switch to day mode" : "Switch to night mode"}">${svg(isDark() ? ICON.sun : ICON.moon, 22)}</button>`;
+  function themeChips() {
+    const p = themePick(), chip = (v, l) => `<button class="chip ${p === v ? "on" : ""}" data-act="theme-set" data-v="${v}">${l}</button>`;
+    return `<h2 class="eyebrow">Appearance</h2><div class="chips">${chip("light", "Day")}${chip("dark", "Night")}${chip("auto", "Same as phone")}</div>`;
+  }
+
   function homeTop() {
     const right = L.user
-      ? `${CSA.alerts ? CSA.alerts.bell() : ""}<button class="me-btn" data-act="nav" data-tab="profile" aria-label="Your profile">${meAvatar()}</button>`
-      : `<button class="btn btn-small" data-act="account">Sign in</button>`;
+      ? `${themeBtn()}${CSA.alerts ? CSA.alerts.bell() : ""}<button class="me-btn" data-act="nav" data-tab="profile" aria-label="Your profile">${meAvatar()}</button>`
+      : `${themeBtn()}<button class="btn btn-small" data-act="account">Sign in</button>`;
     return `<header class="bar topbar"><img class="brand-mark" src="icons/icon-192.png" alt=""><h1 class="brand-name">${esc(ui.APP)}</h1><span class="row-end">${right}</span></header>`;
   }
 
@@ -185,7 +210,7 @@
   }
 
   function accountHtml() {
-    return `<h2 class="eyebrow">Account</h2>
+    return themeChips() + `<h2 class="eyebrow">Account</h2>
       <div class="card stack-s"><p class="muted">Signed in as <b>${esc(L.user.email)}</b></p>
         <div class="row-2"><button class="btn" data-act="sign-out">Sign out</button><a class="btn link-as-btn" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></div>
         ${lg.deleteBox()}</div>`;
@@ -395,6 +420,8 @@
       if (!L.user) { form("account", { mode: "in" }).note = "Sign in to ask to join with your team."; return ui.go("account"); }
       startPick("request", L.tour.t);
     },
+    "theme-toggle"() { setTheme(isDark() ? "light" : "dark"); },
+    "theme-set"(d) { setTheme(d.v); },
     "tj-pick"(d) { H.pick.team = d.id; ui.render(); },
     "tj-send": sendPick,
     "tj-cancel"() { const P = H.pick; H.pick = null; if (P) lg.openTour(P.tour.id); else ui.actions.home(); },
