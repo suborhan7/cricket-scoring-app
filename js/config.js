@@ -5,5 +5,7 @@ window.CSA = Object.assign(window.CSA || {}, {
   config: {
     supabaseUrl: "https://hlditboaogmrkxmwmyqu.supabase.co",
     supabaseKey: "sb_publishable_lrQQ49m6cessvzu1yqaXoA_SBv44JEh",
+    // Turn on after enabling the Google provider in Supabase (Authentication → Sign In / Providers).
+    googleLogin: false,
   },
 });

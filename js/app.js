@@ -66,6 +66,11 @@
 
   // ---------- Home ----------
 
+  // Browsers that support it offer "Install app"; the Android app shell never shows it.
+  let installPrompt = null;
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; if (view.screen === "home") render(); });
+  window.addEventListener("appinstalled", () => { installPrompt = null; render(); });
+
   function homeView() {
     const list = S.list();
     const rows = list.map((r) => {
@@ -82,6 +87,7 @@
     }).join("");
     return `<header class="bar"><h1 class="brand">Cricket Scorer</h1></header>
       <section class="wrap stack">
+        ${installPrompt ? `<button class="install" data-act="install"><img src="icons/icon-192.png" alt=""><span><b>Install Cricket Scorer</b><small>Opens full screen from your home screen and scores offline.</small></span></button>` : ""}
         ${CSA.ui.homeTop()}
         <button class="btn ${CSA.ui.homeTop() ? "" : "btn-primary btn-big"}" data-act="new">Quick match (no tournament)</button>
         ${list.length ? `<h2 class="eyebrow">Matches on this phone</h2><ul class="match-list">${rows}</ul>`
@@ -387,6 +393,7 @@
   }
 
   const actions = {
+    async install() { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; render(); },
     home() { rec = null; closeSheet(); view = { screen: "home", tab: 0 }; render(); },
     "match-back"() { actions.home(); },
     new() { setup = newSetup(); view = { screen: "setup" }; render(); },
