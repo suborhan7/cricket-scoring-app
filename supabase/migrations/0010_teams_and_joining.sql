@@ -261,3 +261,44 @@ grant execute on function public.tournament_for_invite(uuid) to authenticated;
 grant execute on function public.join_with_invite(uuid, uuid) to authenticated;
 grant execute on function public.team_invite_code(uuid, boolean) to authenticated;
 grant execute on function public.join_team(uuid) to authenticated;
+
+-- ---------- Claiming when you already made your own profile ----------
+-- Someone signs up and sets up their profile, then their captain sends the invite link for the
+-- player they had already added by name. If the self-made profile hasn't played or joined a
+-- squad yet, it is folded into the invited one (photo and details carried over) instead of
+-- refusing the claim.
+
+create or replace function public.claim_player(invite uuid) returns json
+language plpgsql security definer set search_path = public as $$
+declare p uuid; nm text; mine public.players;
+begin
+  if (select auth.uid()) is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  select player_id into p from public.player_invites where code = invite;
+  if p is null then
+    raise exception 'This invite link is not valid any more.' using errcode = 'P0002';
+  end if;
+  select * into mine from public.players where claimed_by = (select auth.uid()) and id <> p;
+  if mine.id is not null then
+    if exists (select 1 from public.team_players where player_id = mine.id)
+      or exists (select 1 from public.matches where jsonb_path_exists(lineups, '$.teams[*].players[*] ? (@ == $id)', jsonb_build_object('id', mine.id::text))) then
+      raise exception 'Your account is already linked to another player.' using errcode = '23505';
+    end if;
+    update public.players set
+      photo_path = coalesce(photo_path, mine.photo_path), role = coalesce(role, mine.role),
+      batting_style = coalesce(batting_style, mine.batting_style), bowling_style = coalesce(bowling_style, mine.bowling_style),
+      jersey_no = coalesce(jersey_no, mine.jersey_no)
+    where id = p and claimed_by is null;
+    delete from public.players where id = mine.id;
+  end if;
+  update public.players set claimed_by = (select auth.uid()) where id = p and (claimed_by is null or claimed_by = (select auth.uid()))
+    returning full_name into nm;
+  if nm is null then
+    raise exception 'Someone has already claimed this player.' using errcode = '23505';
+  end if;
+  delete from public.player_invites where player_id = p;
+  return json_build_object('player_id', p, 'full_name', nm);
+end $$;
+revoke execute on function public.claim_player(uuid) from public, anon;
+grant execute on function public.claim_player(uuid) to authenticated;

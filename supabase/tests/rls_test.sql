@@ -317,5 +317,24 @@ do $$ begin
 exception when insufficient_privilege then null;
 end $$;
 
+-- Someone who set up their own profile can still claim the player their captain added:
+-- the unused self-made profile is folded into the invited one.
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000011', 'gopal@example.com');
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+insert into public.players (id, full_name, claimed_by, jersey_no) values ('30000000-0000-0000-0000-000000000011', 'Gopal', '00000000-0000-0000-0000-000000000011', 11);
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+insert into public.players (id, full_name) values ('30000000-0000-0000-0000-000000000012', 'Gopal Das');
+insert into public.team_players values ('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000012');
+create temp table ginv as select public.player_invite_code('30000000-0000-0000-0000-000000000012') as code;
+grant select on ginv to anon, authenticated;
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+select public.claim_player((select code from ginv));
+do $$ begin
+  if exists (select 1 from public.players where id = '30000000-0000-0000-0000-000000000011') then raise exception 'unused own profile was not folded in'; end if;
+  if (select claimed_by from public.players where id = '30000000-0000-0000-0000-000000000012') <> '00000000-0000-0000-0000-000000000011' then raise exception 'claim with own profile did not link'; end if;
+  if (select jersey_no from public.players where id = '30000000-0000-0000-0000-000000000012') <> 11 then raise exception 'own details were not carried over'; end if;
+end $$;
+
 reset role;
 \echo 'All security checks passed'
