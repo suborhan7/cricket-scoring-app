@@ -42,7 +42,7 @@
     rec.events.push(e);
     const after = st();
     if (after.innings[before.current] && JSON.stringify(after) === JSON.stringify(before)) { rec.events.pop(); return; }
-    S.save(rec); buzz();
+    S.save(rec); buzz(); CSA.ui.changed(rec);
     const m = after.milestones.find((x) => x.index === rec.events.length - 1);
     if (m) {
       const team = m.team, who = name(team, m.player);
@@ -57,7 +57,7 @@
 
   function undo() {
     if (!rec.events.length) return;
-    rec.events.pop(); S.save(rec); buzz(); closeSheet(); render();
+    rec.events.pop(); S.save(rec); buzz(); CSA.ui.changed(rec); closeSheet(); render();
   }
 
   // ---------- Home ----------
@@ -78,8 +78,9 @@
     }).join("");
     return `<header class="bar"><h1 class="brand">Cricket Scorer</h1></header>
       <section class="wrap stack">
-        <button class="btn btn-primary btn-big" data-act="new">New match</button>
-        ${list.length ? `<h2 class="eyebrow">Your matches</h2><ul class="match-list">${rows}</ul>`
+        ${CSA.ui.homeTop()}
+        <button class="btn ${CSA.ui.homeTop() ? "" : "btn-primary btn-big"}" data-act="new">Quick match (no tournament)</button>
+        ${list.length ? `<h2 class="eyebrow">Matches on this phone</h2><ul class="match-list">${rows}</ul>`
           : `<p class="empty">No matches yet. Start one, and every ball is saved on this phone as you score, even without signal.</p>`}
       </section>`;
   }
@@ -227,12 +228,17 @@
     else action = `<div class="result"><p class="result-text">${esc(s.result.text)}</p>
       <button class="btn btn-primary btn-big" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="home">All matches</button></div>`;
 
-    const tools = s.next === "done" ? "" : `<div class="tools">
+    let tools = s.next === "done" ? "" : `<div class="tools">
         <button class="btn btn-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}>Undo</button>
         <button class="btn btn-tool" data-act="swap" ${s.next === "ball" ? "" : "disabled"}>Swap strike</button>
         <button class="btn btn-tool" data-act="sheet" data-k="more">More</button></div>`;
-    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="All matches">←</button>
-        <h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1><button class="btn btn-small" data-act="card">Scorecard</button></header>
+    // Someone watching a tournament match (not its scorer) sees the score without the pad.
+    if (rec.readOnly) {
+      tools = "";
+      if (s.next !== "done") action = `<div class="watch"><p class="muted">Live score from the ground.</p><button class="btn" data-act="refresh-match">Refresh</button></div>`;
+    }
+    return `<header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
+        <h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small" data-act="card">Scorecard</button></header>
       ${scoreboard(s)}
       <section class="wrap stack-s">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section>`;
   }
@@ -321,11 +327,13 @@
     else if (view.screen === "setup") $app.innerHTML = setupView();
     else if (view.screen === "score") $app.innerHTML = scoreView();
     else if (view.screen === "card") $app.innerHTML = cardView();
+    else if (CSA.ui.screens[view.screen]) $app.innerHTML = CSA.ui.screens[view.screen](view);
     if (sheet) renderSheet();
   }
 
   const actions = {
     home() { rec = null; closeSheet(); view = { screen: "home", tab: 0 }; render(); },
+    "match-back"() { actions.home(); },
     new() { setup = newSetup(); view = { screen: "setup" }; render(); },
     open(d) { rec = S.get(d.id); if (!rec) return; view = { screen: "score", tab: 0 }; render(); },
     delete(d) {
@@ -398,6 +406,19 @@
   document.addEventListener("change", (ev) => { if (/^team\d-name$/.test(ev.target.dataset.bind || "")) render(); });
 
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && sheet) closeSheet(); });
+
+  // Shared with league.js, which adds accounts, tournaments and syncing on top of these screens.
+  CSA.ui = {
+    esc, toast, shortName, PRESETS, actions, render,
+    screens: {},
+    homeTop: () => "",
+    matchBadge: () => "",
+    changed: () => {},
+    go(screen, extra) { closeSheet(); view = Object.assign({ screen, tab: 0 }, extra || {}); render(); },
+    view: () => view,
+    current: () => rec,
+    openMatch(r, screen) { rec = r; closeSheet(); view = { screen: screen || "score", tab: 0 }; render(); },
+  };
 
   render();
 })();
