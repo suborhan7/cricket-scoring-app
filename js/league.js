@@ -83,7 +83,7 @@
     const body = L.mine == null ? `<p class="muted">${L.mineLoading ? "Loading your tournaments…" : esc(L.mineError)}</p>`
       : rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No tournaments yet. Create one, or ask an organiser to add you as a scorer.</p>`;
     return `<div class="stack-s">
-      <div class="row-between"><h2 class="eyebrow">Your tournaments</h2><button class="link-btn" data-act="account">${esc(displayName())}</button></div>
+      <div class="row-between"><h2 class="eyebrow">Your tournaments</h2><span class="row-end">${CSA.alerts ? CSA.alerts.bell() : ""}<button class="link-btn" data-act="account">${esc(displayName())}</button></span></div>
       ${body}
       <button class="btn btn-primary btn-big" data-act="t-new">New tournament or series</button></div>`;
   };
@@ -698,6 +698,7 @@
         const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
         if (m && !error) m.summary = summary;
       }
+      if (CSA.alerts) CSA.alerts.afterSync(rec, s);
       rec.synced = ev.map((e) => JSON.stringify(e));
       const cur = S.get(rec.match.id);
       if (cur) { cur.synced = rec.synced; cur.cloudStatus = rec.cloudStatus; S.save(cur); }

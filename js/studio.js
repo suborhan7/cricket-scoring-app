@@ -172,9 +172,42 @@
       + section("Results and milestones", results, "Finished matches show up here.");
   }
 
+  // A finished tournament match (L.tour must be open): load its balls and players into a record.
+  async function loadMatch(m) {
+    if (!m || !m.lineups) return null;
+    ui.toast("Loading match…");
+    const [players, events] = await Promise.all([
+      sb.from("players").select("id, full_name").in("id", [].concat(...m.lineups.teams.map((x) => x.players))),
+      sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq"),
+    ]);
+    if (players.error || events.error) { ui.toast(lg.errText(players.error || events.error)); return null; }
+    const names = new Map(players.data.map((p) => [p.id, p.full_name]));
+    const team = (id, i) => { const t = lg.teamById(id); return { name: t.name, short: t.short_name, players: m.lineups.teams[i].players.map((pid) => names.get(pid) || "Player") }; };
+    return {
+      match: { id: m.id, teams: [team(m.team1_id, 0), team(m.team2_id, 1)], battingFirst: m.batting_first || 0, toss: m.toss, rules: m.rules,
+        cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id], playerIds: m.lineups.teams.map((x) => x.players) } },
+      events: events.data.map((r) => r.event),
+    };
+  }
+
+  // Opens the card an alert points to: a milestone {mk, team, player} or the result of a match.
+  async function openAlert(a) {
+    await lg.openTour(a.tournament, "cards");
+    const rec = await loadMatch(L.tour.matches && L.tour.matches.find((x) => x.id === a.match));
+    if (!rec) return ui.toast("This match can't be opened any more.");
+    if (a.mk) {
+      const ms = E.replay(rec.match, rec.events).milestones.find((x) => x.kind === a.mk && x.team === a.team && x.player === a.player);
+      if (!ms) return ui.toast("That milestone was changed after a score correction.");
+      return show(await milestoneCard(rec, ms), "tour");
+    }
+    const card = resultCard(rec);
+    if (card) show(card, "tour"); else openList("Cards", matchCards(rec), "tour");
+  }
+
   // ---------- Preview and share ----------
 
   async function show(card, back) {
+    document.getElementById("toast").hidden = true;
     V.card = Object.assign({ size: "post", back, loading: true, caption: C.caption(card.kind, card.data) }, card);
     ui.go("cardview");
     await draw();
@@ -244,23 +277,9 @@
     "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) show(versusCard(L.tour, m), "tour"); },
     "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
     async "card-match"(d) {
-      // A finished tournament match: load its balls, then list its milestones and result.
       const m = L.tour.matches.find((x) => x.id === d.id);
-      if (!m || !m.lineups) return;
-      ui.toast("Loading match…");
-      const [players, events] = await Promise.all([
-        sb.from("players").select("id, full_name").in("id", [].concat(...m.lineups.teams.map((x) => x.players))),
-        sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq"),
-      ]);
-      if (players.error || events.error) return ui.toast(lg.errText(players.error || events.error));
-      const names = new Map(players.data.map((p) => [p.id, p.full_name]));
-      const team = (id, i) => { const t = lg.teamById(id); return { name: t.name, short: t.short_name, players: m.lineups.teams[i].players.map((pid) => names.get(pid) || "Player") }; };
-      const rec = {
-        match: { id: m.id, teams: [team(m.team1_id, 0), team(m.team2_id, 1)], battingFirst: m.batting_first || 0, toss: m.toss, rules: m.rules,
-          cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id], playerIds: m.lineups.teams.map((x) => x.players) } },
-        events: events.data.map((r) => r.event),
-      };
-      openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "tour");
+      const rec = m && await loadMatch(m);
+      if (rec) openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "tour");
     },
     "card-size"(d) { if (V.card.size !== d.v) { V.card.caption = currentCaption(); V.card.size = d.v; draw(); } },
     "cardview-back"() {
@@ -291,5 +310,5 @@
   const prevExtra = ui.cardExtra;
   ui.cardExtra = (rec) => `<button class="btn btn-primary" data-act="cards-match">Cards for this match</button>` + prevExtra(rec);
 
-  CSA.studio = { tab, show, matchCards };
+  CSA.studio = { tab, show, matchCards, openAlert };
 })();
