@@ -30,9 +30,13 @@
   function rules() { return E.settings(rec.match); }
   function name(team, p) { return p == null ? "" : rec.match.teams[team].players[p]; }
 
-  function toast(msg) {
+  // A toast can carry an action (e.g. open the milestone card); it then stays a little longer.
+  function toast(msg, act) {
     $toast.textContent = msg; $toast.hidden = false;
-    clearTimeout(toast.t); toast.t = setTimeout(() => { $toast.hidden = true; }, 3500);
+    for (const k of Object.keys($toast.dataset)) delete $toast.dataset[k];
+    if (act) Object.assign($toast.dataset, act);
+    $toast.classList.toggle("toast-act", !!act);
+    clearTimeout(toast.t); toast.t = setTimeout(() => { $toast.hidden = true; }, act ? 7000 : 3500);
   }
 
   // ---------- Events ----------
@@ -48,7 +52,7 @@
       const team = m.team, who = name(team, m.player);
       const what = { fifty: `${m.runs} (${m.balls})`, hundred: `${m.runs} (${m.balls})`, threefor: `${m.wickets}/${m.runs}`, fivefor: `${m.wickets}/${m.runs}` }[m.kind];
       const label = { fifty: "Fifty", hundred: "Hundred", threefor: "Three-for", fivefor: "Five-for" }[m.kind];
-      toast(`${label} card ready: ${who} ${what}`);
+      toast(`${label} card ready: ${who} ${what}. Tap to open.`, { act: "milestone-card", i: String(m.index) });
     }
     if (after.current !== before.current && !after.result) toast(`Innings break. Target ${after.innings[0].runs + 1}`);
     closeSheet();
