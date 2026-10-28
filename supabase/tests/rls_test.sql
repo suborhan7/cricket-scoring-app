@@ -99,5 +99,36 @@ end $$;
 select pg_temp.act(null);
 select pg_temp.blocked($q$select public.add_member_by_email('10000000-0000-0000-0000-000000000001', 'org@example.com', 'scorer')$q$);
 
+-- Player invites: the organiser gets a code, the player claims it once.
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+create temp table invite as select public.player_invite_code('30000000-0000-0000-0000-000000000001') as code;
+grant select on invite to anon, authenticated;
+update public.players set jersey_no = 7 where id = '30000000-0000-0000-0000-000000000001';
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  perform public.player_invite_code('30000000-0000-0000-0000-000000000001');
+  raise exception 'a stranger should not get an invite code';
+exception when insufficient_privilege then null;
+end $$;
+do $$ begin
+  if exists (select 1 from public.player_invites) then raise exception 'invite codes must stay private'; end if;
+end $$;
+select public.claim_player((select code from invite));
+do $$ begin
+  if (select claimed_by from public.players where id = '30000000-0000-0000-0000-000000000001') <> '00000000-0000-0000-0000-00000000000c' then raise exception 'claim did not link the player'; end if;
+end $$;
+-- Now the player can edit their own profile.
+update public.players set batting_style = 'left' where id = '30000000-0000-0000-0000-000000000001';
+do $$ begin
+  if (select batting_style from public.players where id = '30000000-0000-0000-0000-000000000001') <> 'left' then raise exception 'player cannot edit own profile'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000b');
+do $$ begin
+  perform public.claim_player((select code from invite));
+  raise exception 'a used invite should not work again';
+exception when no_data_found then null;
+end $$;
+select pg_temp.blocked($q$update public.teams set name = 'Hacked' where id = '20000000-0000-0000-0000-000000000001'$q$);
+
 reset role;
 \echo 'All security checks passed'
