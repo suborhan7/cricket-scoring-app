@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cricket Scorer</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0E1A14; color: #F2F7F4; font-family: system-ui, sans-serif; }
+    main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; box-sizing: border-box; }
+    img { width: 96px; height: 96px; }
+    h1 { margin: 0; font-size: 1.5rem; }
+    p { margin: 0; opacity: 0.75; max-width: 300px; line-height: 1.5; }
+    button { margin-top: 8px; padding: 14px 32px; border: 0; border-radius: 10px; background: #0F7A45; color: #fff; font: 600 1rem system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="icon.svg" alt="">
+    <h1>No internet</h1>
+    <p>Cricket Scorer needs a connection the first time it opens. After that, scoring works offline.</p>
+    <button onclick="location.href = window.APP_URL || '/'">Try again</button>
+  </main>
+  <script>window.APP_URL = "https://cricket-scoring-app.vercel.app";</script>
+</body>
+</html>

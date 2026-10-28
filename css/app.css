@@ -311,3 +311,18 @@ button { cursor: pointer; }
 .feed-team span:last-child { margin-left: auto; font-family: var(--display); font-weight: 700; font-size: 1.1rem; }
 .feed-team.won b, .feed-team.won span:last-child { color: var(--turf); }
 .feed-result { color: var(--muted); }
+
+/* Install banner */
+.install { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border: 0; border-radius: var(--r); background: var(--board); color: var(--board-ink); text-align: left; font: inherit; }
+.install img { width: 44px; height: 44px; border-radius: 10px; }
+.install span { display: flex; flex-direction: column; gap: 2px; }
+.install small { opacity: 0.75; }
+
+/* Google sign-in */
+.btn-google { display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.or { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--muted); font-size: 0.85rem; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* Account deletion */
+.danger-link { color: var(--ball); align-self: flex-start; }
+.danger-card { border-color: var(--ball); }

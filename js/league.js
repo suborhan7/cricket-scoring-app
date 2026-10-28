@@ -122,11 +122,15 @@
     if (L.user) {
       return bar("Account") + `<section class="wrap stack">
         <p>Signed in as <b>${esc(L.user.email)}</b>.</p>
-        <button class="btn" data-act="sign-out">Sign out</button></section>`;
+        <button class="btn" data-act="sign-out">Sign out</button>
+        <a class="link-btn" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>
+        ${deleteBox()}</section>`;
     }
     const f = form("account", { mode: "in" }), up = f.mode === "up";
     return bar(up ? "Create account" : "Sign in") + `<section class="wrap stack">
       <div class="chips"><button class="chip ${up ? "" : "on"}" data-act="auth-mode" data-m="in">Sign in</button><button class="chip ${up ? "on" : ""}" data-act="auth-mode" data-m="up">Create account</button></div>
+      ${googleOk() ? `<button class="btn btn-big btn-google" data-act="auth-google"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>Continue with Google</button>
+      <p class="or"><span>or with email</span></p>` : ""}
       <form class="card stack-s" data-form="auth">
         ${up ? field("Your name", `<input id="auth-name" data-f="account.name" value="${esc(f.name || "")}" autocomplete="name">`) : ""}
         ${field("Email", `<input id="auth-email" data-f="account.email" type="email" value="${esc(f.email || "")}" autocomplete="email" required>`)}
@@ -135,6 +139,21 @@
         <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Please wait…" : up ? "Create account" : "Sign in"}</button>
       </form></section>`;
   };
+
+  function deleteBox() {
+    const f = form("delacct", {});
+    if (!f.open) return `<button class="link-btn danger-link" data-act="acct-del-open">Delete my account</button>`;
+    return `<div class="card stack-s danger-card">
+      <b>Delete your account?</b>
+      <p class="muted">This removes your login, your roles and your alerts. Tournaments where you are the only organiser are deleted with all their matches. Tournaments shared with other organisers stay. This can't be undone.</p>
+      ${field("Type DELETE to confirm", `<input id="del-confirm" data-f="delacct.text" value="${esc(f.text || "")}" autocomplete="off" autocapitalize="characters">`)}
+      ${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+      <div class="row-between"><button class="btn" data-act="acct-del-cancel">Cancel</button>
+      <button class="btn btn-danger" data-act="acct-del" ${f.busy ? "disabled" : ""}>${f.busy ? "Deleting…" : "Delete account"}</button></div></div>`;
+  }
+
+  // Google sign-in runs in the browser only: Google blocks it inside app web views.
+  const googleOk = () => cfg.googleLogin && !(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
   async function submitAuth() {
     const f = form("account"), up = f.mode === "up";
@@ -868,6 +887,24 @@
       ui.go("tnew");
     },
     async "feed-open"(d) { await openTour(d.t, "matches"); await openMatch(d.id); },
+    "acct-del-open"() { form("delacct").open = true; ui.render(); },
+    "acct-del-cancel"() { L.forms.delacct = {}; ui.render(); },
+    async "acct-del"() {
+      const f = form("delacct");
+      if ((f.text || "").trim().toUpperCase() !== "DELETE") { f.error = "Type DELETE to confirm."; return ui.render(); }
+      f.busy = true; f.error = ""; ui.render();
+      const { error } = await sb.rpc("delete_my_account");
+      f.busy = false;
+      if (error) { f.error = errText(error); return ui.render(); }
+      L.forms.delacct = {};
+      await sb.auth.signOut();
+      ui.toast("Your account was deleted.");
+      ui.actions.home();
+    },
+    async "auth-google"() {
+      const { error } = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+      if (error) ui.toast(errText(error));
+    },
     "stat-kind"(d) { L.tour.statKind = d.k; ui.render(); },
     "tnew-sponsor"(d) { form("tnew").showSponsor = d.v === "1"; ui.render(); },
     "t-open"(d) { openTour(d.id); },

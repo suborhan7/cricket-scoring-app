@@ -1,0 +1,14 @@
+{
+  "appId": "io.github.suborhan7.cricketscorer",
+  "appName": "Cricket Scorer",
+  "webDir": "www",
+  "server": {
+    "url": "https://cricket-scoring-app.vercel.app",
+    "androidScheme": "https",
+    "errorPath": "offline.html"
+  },
+  "android": { "backgroundColor": "#0E1A14" },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 800, "backgroundColor": "#0E1A14", "showSpinner": false }
+  }
+}

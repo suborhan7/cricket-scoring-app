@@ -158,5 +158,36 @@ do $$ begin
   if (select count(*) from public.notifications where read_at is null) <> 1 then raise exception 'organiser alert missing or touched by someone else'; end if;
 end $$;
 
+-- Deleting an account. A solo organiser's tournament goes with them; a scorer's balls in
+-- someone else's tournament stay.
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000d', 'solo@example.com');
+select pg_temp.act('00000000-0000-0000-0000-00000000000d');
+insert into public.tournaments (id, name, overs_per_side) values ('10000000-0000-0000-0000-000000000009', 'Solo Cup', 6);
+insert into public.teams (id, name, short_name) values ('20000000-0000-0000-0000-000000000009', 'Solo XI', 'SX');
+insert into public.tournament_teams (tournament_id, team_id) values ('10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009'), ('10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000002');
+insert into public.matches (id, tournament_id, team1_id, team2_id) values ('40000000-0000-0000-0000-000000000009', '10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000002');
+insert into public.match_events (match_id, seq, event) values ('40000000-0000-0000-0000-000000000009', 0, '{"t":"ball","runs":1}');
+select public.delete_my_account();
+select pg_temp.act(null);
+do $$ begin
+  if exists (select 1 from public.tournaments where id = '10000000-0000-0000-0000-000000000009') then raise exception 'solo tournament should be deleted'; end if;
+  if (select created_by from public.teams where id = '20000000-0000-0000-0000-000000000009') is not null then raise exception 'team creator should be blank'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000b');
+select public.delete_my_account();
+reset role;
+do $$ begin
+  if exists (select 1 from auth.users where id in ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000d')) then raise exception 'accounts not deleted'; end if;
+  if not exists (select 1 from public.tournaments where id = '10000000-0000-0000-0000-000000000001') then raise exception 'shared tournament was deleted'; end if;
+  if (select count(*) from public.match_events where match_id = '40000000-0000-0000-0000-000000000001') = 0 then raise exception 'scored balls were lost'; end if;
+end $$;
+select pg_temp.act(null);
+do $$ begin
+  perform public.delete_my_account();
+  raise exception 'anon should not delete accounts';
+exception when insufficient_privilege then null;
+end $$;
+
 reset role;
 \echo 'All security checks passed'
