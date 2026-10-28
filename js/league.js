@@ -70,7 +70,37 @@
     rerender("home");
   }
 
-  ui.homeTop = () => {
+  // ---------- Live and recent matches (everyone, signed in or not) ----------
+
+  L.feed = null;
+  async function loadFeed() {
+    const { data, error } = await sb.from("matches").select("id, tournament_id, team1_id, team2_id, status, result_text, winner_team_id, summary, stage, created_at, tournaments(name, short_name)")
+      .in("status", ["live", "done"]).order("created_at", { ascending: false }).limit(12);
+    if (error) return;
+    const ids = [...new Set([].concat(...data.map((m) => [m.team1_id, m.team2_id])))];
+    const teams = ids.length ? (await sb.from("teams").select("id, name, short_name, logo_path, primary_color, secondary_color").in("id", ids)).data || [] : [];
+    const byId = new Map(teams.map((t) => [t.id, t]));
+    L.feed = data.map((m) => Object.assign(m, { a: byId.get(m.team1_id) || { short_name: "?" }, b: byId.get(m.team2_id) || { short_name: "?" } }))
+      .sort((x, y) => (y.status === "live") - (x.status === "live") || String(y.created_at).localeCompare(String(x.created_at)));
+    rerender("home");
+  }
+  loadFeed();
+  setInterval(() => { if (onScreen("home") && document.visibilityState === "visible") loadFeed(); }, 30 * 1000);
+
+  function feedHtml() {
+    if (!L.feed || !L.feed.length) return "";
+    const score = (m, i) => { const inn = m.summary && m.summary.innings && m.summary.innings.find((x) => x.team === i); return inn ? `${inn.runs}/${inn.wickets}` : ""; };
+    const rows = L.feed.slice(0, 8).map((m) => `<li><button class="feed-row" data-act="feed-open" data-id="${m.id}" data-t="${m.tournament_id}">
+        <span class="feed-top"><small>${esc((m.tournaments && (m.tournaments.short_name || m.tournaments.name)) || "")}</small>${m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : ""}</span>
+        <span class="feed-team ${m.winner_team_id && m.winner_team_id === m.team1_id ? "won" : ""}">${badge(m.a)}<b>${esc(m.a.short_name)}</b><span>${score(m, 0)}</span></span>
+        <span class="feed-team ${m.winner_team_id && m.winner_team_id === m.team2_id ? "won" : ""}">${badge(m.b)}<b>${esc(m.b.short_name)}</b><span>${score(m, 1)}</span></span>
+        <small class="feed-result">${esc(m.status === "live" ? "In progress" : m.result_text || "")}</small></button></li>`).join("");
+    return `<div class="stack-s"><h2 class="eyebrow">Live and recent</h2><ul class="feed">${rows}</ul></div>`;
+  }
+
+  ui.homeTop = () => homeMine() + feedHtml();
+
+  function homeMine() {
     if (!L.user) {
       return `<div class="card promo stack-s">
         <h2 class="promo-title">Run a tournament</h2>
@@ -86,7 +116,7 @@
       <div class="row-between"><h2 class="eyebrow">Your tournaments</h2><span class="row-end">${CSA.alerts ? CSA.alerts.bell() : ""}<button class="link-btn" data-act="account">${esc(displayName())}</button></span></div>
       ${body}
       <button class="btn btn-primary btn-big" data-act="t-new">New tournament or series</button></div>`;
-  };
+  }
 
   ui.screens.account = () => {
     if (L.user) {
@@ -339,7 +369,7 @@
         const when = m.starts_at ? new Date(m.starts_at).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "Date not set";
         const pill = m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" ? `<span class="pill pill-done">${esc(m.result_text || "Result")}</span>` : `<span class="pill">${esc(when)}</span>`;
         return `<li><button class="t-row" data-act="m-open" data-id="${m.id}"><span class="vs">${badge(a)}<b>v</b>${badge(b)}</span>
-          <span class="t-text"><b>${esc(a.short_name)} v ${esc(b.short_name)}</b><small>${esc([m.stage !== "group" ? m.stage : "", m.venue].filter(Boolean).join(" · ") || (m.match_no ? "Match " + m.match_no : ""))}</small>${pill}</span></button></li>`;
+          <span class="t-text"><b>${esc(a.short_name)} v ${esc(b.short_name)}</b><small>${esc([m.stage !== "group" ? STAGE_LABEL[m.stage] || "" : "", m.venue].filter(Boolean).join(" · ") || (m.match_no ? "Match " + m.match_no : ""))}</small>${pill}</span></button></li>`;
       }).join("");
       body = (rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No matches yet.${isOrganiser() ? (T.teams.length < 2 ? " Add at least two teams first." : " Add the first fixture.") : ""}</p>`)
         + (isOrganiser() && T.teams.length >= 2 ? `<button class="btn btn-primary" data-act="match-new">New match</button>` : "");
@@ -402,8 +432,27 @@
   // Group matches decide the table; in a series every match counts.
   const tableMatches = (T) => T.matches.filter((m) => T.t.kind === "series" || m.stage === "group");
 
+  const STAGE_LABEL = { quarter: "Quarter-final", semi: "Semi-final", final: "Final", series: "Series", other: "" };
+
+  // Knockout rounds side by side: quarter-finals, semi-finals, final. The winner of each tie is bold.
+  function knockouts(T) {
+    const rounds = [["quarter", "Quarter-finals"], ["semi", "Semi-finals"], ["final", "Final"]]
+      .map(([k, l]) => [l, T.matches.filter((m) => m.stage === k)]).filter(([, ms]) => ms.length);
+    if (!rounds.length) return "";
+    const side = (m, i) => {
+      const id = i ? m.team2_id : m.team1_id, tm = teamById(id);
+      const inn = m.summary && m.summary.innings ? m.summary.innings.find((x) => x.team === i) : null;
+      const won = m.winner_team_id === id, lost = m.status === "done" && m.winner_team_id && !won;
+      return `<span class="ko-side ${won ? "won" : ""} ${lost ? "lost" : ""}">${badge(tm)}<b>${esc(tm.short_name)}</b><span class="ko-score">${inn ? `${inn.runs}/${inn.wickets}` : ""}</span></span>`;
+    };
+    const col = ([label, ms]) => `<div class="ko-round"><h3 class="eyebrow">${label}</h3>${ms.map((m) => `<button class="ko-match" data-act="m-open" data-id="${m.id}">
+        ${side(m, 0)}${side(m, 1)}<small>${m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" ? esc(m.result_text || "") : m.starts_at ? esc(new Date(m.starts_at).toLocaleDateString([], { day: "numeric", month: "short" })) : "Date not set"}</small></button>`).join("")}</div>`;
+    return `<h2 class="eyebrow">Knockouts</h2><div class="ko">${rounds.map(col).join("")}</div>`;
+  }
+
   function tableTab(T) {
     if (T.teams.length < 2) return `<p class="muted">The table shows up once there are teams and results.</p>`;
+    if (T.t.kind !== "series" && !T.matches.some((m) => m.stage === "group") && T.matches.some((m) => STAGE_LABEL[m.stage])) return knockouts(T);
     const groups = {};
     for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm.id);
     const ms = tableMatches(T);
@@ -418,24 +467,36 @@
       return `<div class="table-wrap"><table class="tbl tbl-points"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
     }).join("");
     const done = ms.filter((m) => m.status === "done" || m.status === "abandoned").length;
-    return tables + `<p class="muted small">${done ? `From ${done} finished match${done === 1 ? "" : "es"}.` : "No results yet."} Win 2 points, tie or no result 1. NRR counts an all-out side as facing its full overs.</p>`;
+    return tables + `<p class="muted small">${done ? `From ${done} finished match${done === 1 ? "" : "es"}.` : "No results yet."} Win 2 points, tie or no result 1. NRR counts an all-out side as facing its full overs.</p>` + knockouts(T);
   }
+
+  const STAT_KINDS = [["runs", "Most runs"], ["wickets", "Most wickets"], ["scores", "Highest score"], ["figures", "Best bowling"], ["sixes", "Most sixes"], ["fours", "Most fours"]];
 
   function statsTab(T) {
     const L2 = CSA.stats.leaders(T.matches);
     if (!L2.runs.length) return `<p class="muted">Run and wicket leaders show up after the first finished match.</p>`;
+    const kind = T.statKind || "runs";
     const row = (x, i, big, small) => {
       const tm = teamById(x.teamId);
       const inner = `<span class="pos">${i + 1}</span>${badge(tm)}
         <span class="t-text"><b>${esc(x.name)}</b><small>${esc(tm.short_name)} · ${small}</small></span><span class="leader-n">${big}</span>`;
       return `<li class="leader${i === 0 ? " leader-top" : ""}">${x.id ? `<button class="leader-btn" data-act="p-open" data-id="${x.id}">${inner}</button>` : inner}</li>`;
     };
-    const runs = L2.runs.slice(0, 10).map((x, i) => row(x, i, x.runs,
-      `${x.inns} inn · SR ${x.sr.toFixed(1)}${x.avg != null ? ` · Avg ${x.avg.toFixed(1)}` : ""} · Best ${x.best}${x.bestOut ? "" : "*"}`)).join("");
-    const wkts = L2.wickets.filter((x) => x.wickets > 0).slice(0, 10).map((x, i) => row(x, i, x.wickets,
-      `${x.overs} ov · Econ ${x.econ.toFixed(2)} · Best ${x.bestW}/${x.bestR}`)).join("");
-    return `<h2 class="eyebrow">Most runs</h2><ol class="leaders">${runs}</ol>
-      <h2 class="eyebrow">Most wickets</h2>${wkts ? `<ol class="leaders">${wkts}</ol>` : `<p class="muted">No wickets yet.</p>`}`;
+    const vs = (x) => `v ${esc(teamById(x.vsId).short_name)}`;
+    const lists = {
+      runs: () => L2.runs.map((x, i) => row(x, i, x.runs,
+        `${x.inns} inn · SR ${x.sr.toFixed(1)}${x.avg != null ? ` · Avg ${x.avg.toFixed(1)}` : ""} · Best ${x.best}${x.bestOut ? "" : "*"}`)),
+      wickets: () => L2.wickets.filter((x) => x.wickets > 0).map((x, i) => row(x, i, x.wickets,
+        `${x.overs} ov · Econ ${x.econ.toFixed(2)} · Best ${x.bestW}/${x.bestR}`)),
+      scores: () => L2.scores.map((x, i) => row(x, i, `${x.runs}${x.out ? "" : "*"}`, `${vs(x)} · ${x.balls} ball${x.balls === 1 ? "" : "s"}`)),
+      figures: () => L2.figures.map((x, i) => row(x, i, `${x.wickets}/${x.runs}`, `${vs(x)} · ${x.overs} ov`)),
+      sixes: () => L2.sixes.map((x, i) => row(x, i, x.sixes, `${x.runs} runs · ${x.inns} inn`)),
+      fours: () => L2.fours.map((x, i) => row(x, i, x.fours, `${x.runs} runs · ${x.inns} inn`)),
+    };
+    const items = lists[kind]().slice(0, 10).join("");
+    const chips = STAT_KINDS.map(([k, l]) => `<button class="chip ${k === kind ? "on" : ""}" data-act="stat-kind" data-k="${k}">${l}</button>`).join("");
+    return `<div class="chips chips-scroll">${chips}</div>
+      ${items ? `<ol class="leaders">${items}</ol>` : `<p class="muted">Nothing here yet.</p>`}`;
   }
 
   // ---------- New team ----------
@@ -806,6 +867,8 @@
         showSponsor: t.show_sponsor !== false, sponsorName: t.sponsor_name || "", sponsorUrl: t.sponsor_logo_path ? publicUrl("logos", t.sponsor_logo_path) : "" };
       ui.go("tnew");
     },
+    async "feed-open"(d) { await openTour(d.t, "matches"); await openMatch(d.id); },
+    "stat-kind"(d) { L.tour.statKind = d.k; ui.render(); },
     "tnew-sponsor"(d) { form("tnew").showSponsor = d.v === "1"; ui.render(); },
     "t-open"(d) { openTour(d.id); },
     "show-log"() { const rec = ui.current(); if (rec) loadLog(rec); },

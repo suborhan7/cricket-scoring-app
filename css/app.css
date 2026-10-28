@@ -286,3 +286,28 @@ button { cursor: pointer; }
 .alert-icon { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--turf); color: #fff; font-weight: 700; }
 .alert-when { opacity: 0.7; }
 .dot-new { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--turf); margin: 6px 4px 0 auto; }
+
+/* Stats categories and knockouts */
+.chips-scroll { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+.chips-scroll::-webkit-scrollbar { display: none; }
+.chips-scroll .chip { flex: none; }
+.ko { display: flex; gap: 12px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 6px; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; }
+.ko-round { flex: 0 0 min(72%, 260px); display: flex; flex-direction: column; justify-content: space-around; gap: 10px; scroll-snap-align: start; }
+.ko-round .eyebrow { margin: 0; }
+.ko-match { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
+.ko-match small { color: var(--muted); }
+.ko-side { display: flex; align-items: center; gap: 8px; }
+.ko-side .ko-score { margin-left: auto; font-family: var(--display); font-weight: 700; font-size: 1.1rem; }
+.ko-side.won b, .ko-side.won .ko-score { color: var(--turf); }
+.ko-side.lost { opacity: 0.6; }
+
+/* Live and recent feed on the home screen */
+.feed { list-style: none; margin: 0 -16px; padding: 0 16px 6px; display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+.feed::-webkit-scrollbar { display: none; }
+.feed li { flex: 0 0 min(70%, 240px); scroll-snap-align: start; }
+.feed-row { display: flex; flex-direction: column; gap: 6px; width: 100%; height: 100%; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
+.feed-top { display: flex; align-items: center; justify-content: space-between; color: var(--muted); min-height: 22px; }
+.feed-team { display: flex; align-items: center; gap: 8px; }
+.feed-team span:last-child { margin-left: auto; font-family: var(--display); font-weight: 700; font-size: 1.1rem; }
+.feed-team.won b, .feed-team.won span:last-child { color: var(--turf); }
+.feed-result { color: var(--muted); }
