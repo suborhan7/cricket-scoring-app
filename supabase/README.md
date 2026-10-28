@@ -4,6 +4,7 @@
 
 1. Create a free project at [supabase.com](https://supabase.com). Pick the Singapore region; it's the closest to Bangladesh.
 2. Open **SQL Editor → New query**, paste all of `migrations/0001_init.sql`, and press **Run**.
+   Then do the same with each later file in `migrations/` in number order (`0002_match_summary.sql`, …). Each one is safe to run again.
 3. Under **Authentication → Sign In / Providers**, keep Email on. Add Google later if you want it.
 4. From **Project Settings → API**, copy the **Project URL** and the **anon / publishable key** into the app config (next PR). These two are public by design. Never put the **service_role** key in the app or share it.
 

@@ -6,6 +6,6 @@ cd "$(dirname "$0")"
 DB=cricket_scorer_test
 dropdb --if-exists "$DB" && createdb "$DB"
 psql -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase_stub.sql
-psql -q -v ON_ERROR_STOP=1 -d "$DB" -f ../migrations/0001_init.sql
+for f in ../migrations/*.sql; do psql -q -v ON_ERROR_STOP=1 -d "$DB" -f "$f"; done
 psql -q -o /dev/null -v ON_ERROR_STOP=1 -d "$DB" -f rls_test.sql
 dropdb "$DB"

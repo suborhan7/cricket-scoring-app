@@ -29,6 +29,9 @@ Tap **New match → Fill sample teams → Start match** to try it in under a min
 - Every ball is sent to the database in the background. With no signal it waits and sends when the phone is back online; the badge in the top bar says Synced, Saving or Offline.
 - Anyone who opens a live match without scoring rights sees the score with a Refresh button instead of the pad.
 - Quick matches still work with no account.
+- **Share** (the arrow icon) sends a link to a tournament or a match. Anyone who opens it lands straight on it, and a live match refreshes itself every 15 seconds.
+- **Table** tab: points table for each group (P, W, L, T, NR, points, net run rate). Win 2, tie or no result 1.
+- **Stats** tab: most runs and most wickets, with strike rate, average, economy and best figures.
 
 ## How it works
 
@@ -43,6 +46,7 @@ Tap **New match → Fill sample teams → Start match** to try it in under a min
 | `js/engine.js` | Cricket rules and scoring maths. No screen code, so it runs in tests too |
 | `js/app.js` | The screens: matches, new match, scoring pad, scorecard |
 | `js/store.js` | Saves matches on the phone |
+| `js/stats.js` | Points table, net run rate and leaders, from a short summary saved with each finished match |
 | `js/league.js` | Accounts, tournaments, teams, fixtures and syncing balls to Supabase |
 | `js/config.js` | Supabase project URL and publishable key (public by design; never put the secret key here) |
 | `vendor/supabase.js` | supabase-js 2.117.3, MIT licence |
@@ -61,8 +65,7 @@ Needs Node 18 or newer. No packages to install.
 
 ## Next
 
-1. Live score link for spectators.
-2. Points table, leaderboards and a screen for fixing old balls.
-3. Scorer invites, so an organiser can let a friend score.
-4. Milestone cards and alerts.
-5. Wrap as an Android APK with Capacitor.
+1. A screen for fixing old balls.
+2. Scorer invites, so an organiser can let a friend score.
+3. Milestone cards and alerts.
+4. Wrap as an Android APK with Capacitor.

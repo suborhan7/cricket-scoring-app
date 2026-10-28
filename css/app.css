@@ -216,3 +216,20 @@ button { cursor: pointer; }
 .sync-saved { background: rgba(200, 241, 105, 0.18); color: var(--lime); }
 .sync-offline, .sync-signin { background: rgba(243, 177, 75, 0.2); color: #F3B14B; }
 .watch { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* Points table and leaders */
+.small { font-size: 0.85rem; }
+.pos { width: 18px; flex: none; text-align: right; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tbl-team { display: flex; align-items: center; gap: 8px; }
+.tbl-team .logo-s { width: 28px; height: 28px; border-radius: 8px; font-size: 0.7rem; }
+.tbl-team b { font-family: var(--display); font-size: 1.1rem; font-weight: 600; }
+.tbl-points td { padding-top: 7px; padding-bottom: 7px; }
+.tbl-points .pts { font-family: var(--display); font-size: 1.15rem; font-weight: 700; color: var(--ink); }
+.leaders { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.leader { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.leader:last-child { border-bottom: 0; }
+.leader .logo-s { width: 32px; height: 32px; border-radius: 9px; font-size: 0.72rem; }
+.leader .t-text b { font-family: var(--body); font-size: 1rem; font-weight: 700; }
+.leader-n { font-family: var(--display); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.leader-top { background: var(--turf-soft); }
+.leader-top .leader-n { color: var(--turf); font-size: 2rem; }
