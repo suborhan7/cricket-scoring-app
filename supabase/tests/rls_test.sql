@@ -130,5 +130,33 @@ exception when no_data_found then null;
 end $$;
 select pg_temp.blocked($q$update public.teams set name = 'Hacked' where id = '20000000-0000-0000-0000-000000000001'$q$);
 
+-- Card-ready alerts: the scorer sends one; the organiser and the player (who claimed
+-- their profile above) get it, once, and nobody else can read or send them.
+select pg_temp.act('00000000-0000-0000-0000-00000000000b');
+do $$ declare n int; begin
+  n := public.notify_card('40000000-0000-0000-0000-000000000001', 'milestone', 'Fifty card ready', 'Tanvir Ahmed 52 (30)', '30000000-0000-0000-0000-000000000001', '{"key":"fifty:0:0"}');
+  if n <> 2 then raise exception 'alert should reach organiser and player, reached %', n; end if;
+  n := public.notify_card('40000000-0000-0000-0000-000000000001', 'milestone', 'Fifty card ready', 'again', '30000000-0000-0000-0000-000000000001', '{"key":"fifty:0:0"}');
+  if n <> 0 then raise exception 'the same alert went out twice'; end if;
+  if exists (select 1 from public.notifications) then raise exception 'scorer can read other people''s alerts'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if (select count(*) from public.notifications) <> 1 then raise exception 'player did not get the alert'; end if;
+  if (select data ->> 'match' from public.notifications) <> '40000000-0000-0000-0000-000000000001' then raise exception 'alert does not say which match'; end if;
+  perform public.notify_card('40000000-0000-0000-0000-000000000001', 'result', 'Spam', '', null, '{}');
+  raise exception 'a stranger should not send alerts';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.blocked($q$insert into public.notifications (user_id, kind, title, dedupe) values ('00000000-0000-0000-0000-00000000000a', 'result', 'Spam', 'x')$q$);
+update public.notifications set read_at = now();
+do $$ begin
+  if (select count(*) from public.notifications where read_at is null) <> 0 then raise exception 'player cannot mark an alert read'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+do $$ begin
+  if (select count(*) from public.notifications where read_at is null) <> 1 then raise exception 'organiser alert missing or touched by someone else'; end if;
+end $$;
+
 reset role;
 \echo 'All security checks passed'
