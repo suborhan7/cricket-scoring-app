@@ -157,7 +157,7 @@ button { cursor: pointer; }
 
 /* Scorecard */
 .tabs { display: flex; gap: 8px; overflow-x: auto; }
-.tab { border: 1.5px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 16px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; min-height: 44px; }
+.tab { border: 1.5px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 14px; flex: none; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; min-height: 44px; }
 .tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
 .tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -233,3 +233,14 @@ button { cursor: pointer; }
 .leader-n { font-family: var(--display); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
 .leader-top { background: var(--turf-soft); }
 .leader-top .leader-n { color: var(--turf); font-size: 2rem; }
+
+/* Fixing a ball from the scorecard */
+.ball-fix { font: inherit; font-weight: 700; font-size: 0.85rem; cursor: pointer; color: inherit; }
+.ball-fix:active { transform: scale(0.94); }
+
+/* Tournament people */
+.person { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.person:last-child { border-bottom: 0; }
+.person .t-text b { font-family: var(--body); font-size: 1rem; font-weight: 700; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--turf-soft); color: var(--turf); font-weight: 700; }
+.people { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }

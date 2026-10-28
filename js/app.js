@@ -264,6 +264,7 @@
         ${inn.nonStriker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.nonStriker}">Retire ${esc(name(inn.batting, inn.nonStriker))} (hurt)</button>` : ""}
         <button class="btn btn-danger" data-act="end-innings">End this innings now</button></div>`;
     if (sheet.kind === "out") body = outForm(inn, t);
+    if (sheet.kind === "fix") body = fixForm();
     $sheet.innerHTML = `<div class="sheet-scrim" data-act="close-sheet"></div><div class="sheet-panel" role="dialog" aria-modal="true">
       <button class="icon-btn sheet-x" data-act="close-sheet" aria-label="Close">✕</button>${body}</div>`;
     $sheet.hidden = false;
@@ -289,6 +290,49 @@
       </div>`;
   }
 
+  // Fixing a ball scored earlier: change what kind of ball it was and the runs, or remove it.
+  // The wicket on a ball stays as it was; to take a wicket away, remove the ball.
+  const FIX_RUNS = { legal: [0, 1, 2, 3, 4, 5, 6], wd: [0, 1, 2, 3, 4], nb: [0, 1, 2, 3, 4, 6], b: [1, 2, 3, 4], lb: [1, 2, 3, 4] };
+  const FIX_LABEL = { legal: "Fair ball", wd: "Wide", nb: "No ball", b: "Byes", lb: "Leg byes" };
+
+  function openFix(i) {
+    const e = rec.events[i];
+    if (!e || e.t !== "ball") return;
+    sheet = { kind: "fix", index: i, delivery: e.extra || "legal", runs: e.runs || 0, error: "" };
+    renderSheet();
+  }
+
+  function fixForm() {
+    const f = sheet, e = rec.events[f.index], w = e.wicket && e.wicket.kind !== "retired" ? e.wicket : null;
+    // A ball with a wicket can only become a delivery that wicket can happen on.
+    const kinds = Object.keys(FIX_LABEL).filter((k) => !w || (KINDS_FOR[k] || []).includes(w.kind));
+    if (!FIX_RUNS[f.delivery].includes(f.runs)) f.runs = FIX_RUNS[f.delivery][0];
+    const chip = (act, val, cur, label) => `<button class="chip ${val === cur ? "on" : ""}" data-act="${act}" data-v="${val}">${label}</button>`;
+    const s = st(), inn = s.innings.find((x) => x.overs.some((o) => o.some((b) => b.index === f.index)));
+    const ball = inn && [].concat(...inn.overs).find((b) => b.index === f.index);
+    return `<h2>Fix this ball</h2>
+      <p class="muted">Now: <b>${esc(ball ? ball.label : "?")}</b>${w ? ` · ${esc(E.WICKET_KINDS[w.kind])} stays. Remove the ball to take the wicket away.` : ""}</p>
+      <div class="stack-s">
+        <div class="chips">${kinds.map((k) => chip("fix-del", k, f.delivery, FIX_LABEL[k])).join("")}</div>
+        <span class="eyebrow">${f.delivery === "wd" ? "Extra runs on top of the wide" : f.delivery === "nb" ? "Runs off the bat" : "Runs"}</span>
+        <div class="chips">${FIX_RUNS[f.delivery].map((n) => chip("fix-runs", String(n), String(f.runs), String(n))).join("")}</div>
+        ${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        <button class="btn btn-primary btn-big" data-act="fix-save">Save change</button>
+        <button class="btn btn-danger" data-act="fix-delete">Remove this ball</button>
+      </div>`;
+  }
+
+  // Applies a change to the event list, keeping it only if the match still replays cleanly.
+  function applyFix(change) {
+    const before = rec.events.slice();
+    change(rec.events);
+    try { E.replay(rec.match, rec.events); } catch (err) {
+      rec.events = before; sheet.error = "That change doesn't fit the balls after it. Try removing the ball instead."; return renderSheet();
+    }
+    S.save(rec); buzz(); CSA.ui.changed(rec); closeSheet(); render();
+    toast("Ball fixed. Totals updated.");
+  }
+
   // ---------- Scorecard ----------
 
   function cardView() {
@@ -304,7 +348,13 @@
     const x = inn.extras, ext = x.wd + x.nb + x.b + x.lb;
     const yet = t[inn.batting].players.map((_, i) => i).filter((i) => !inn.batters.some((b) => b.player === i)).map((i) => esc(name(inn.batting, i)));
     const fow = inn.fow.map((f) => `${f.runs}-${f.wicket} (${esc(name(inn.batting, f.player))}, ${f.over})`).join(", ");
-    const overs = inn.overs.filter((o) => o.length).map((o, n) => `<li><span class="over-n">${n + 1}</span><span class="balls">${o.map((b) => `<span class="ball ${b.wicket ? "b-w" : b.extra ? "b-x" : b.runs === 4 ? "b-4" : b.runs === 6 ? "b-6" : b.runs === 0 ? "b-0" : ""}">${b.label === "0" ? "•" : esc(b.label)}</span>`).join("")}</span><b>${o.reduce((a, b) => a + b.runs, 0)}</b></li>`).join("");
+    // The scorer can tap any ball here to fix it; fans just see the balls.
+    const fixable = !rec.readOnly;
+    const ballEl = (b) => {
+      const cls = `ball ${b.wicket ? "b-w" : b.extra ? "b-x" : b.runs === 4 ? "b-4" : b.runs === 6 ? "b-6" : b.runs === 0 ? "b-0" : ""}`, label = b.label === "0" ? "•" : esc(b.label);
+      return fixable ? `<button class="${cls} ball-fix" data-act="fix-ball" data-i="${b.index}" aria-label="Fix this ball: ${esc(b.label)}">${label}</button>` : `<span class="${cls}">${label}</span>`;
+    };
+    const overs = inn.overs.filter((o) => o.length).map((o, n) => `<li><span class="over-n">${n + 1}</span><span class="balls">${o.map(ballEl).join("")}</span><b>${o.reduce((a, b) => a + b.runs, 0)}</b></li>`).join("");
     return `<header class="bar"><button class="icon-btn" data-act="back-score" aria-label="Back">←</button><h1>Scorecard</h1></header>
       <section class="wrap stack">
         ${s.result ? `<p class="result-text">${esc(s.result.text)}</p>` : ""}
@@ -316,7 +366,8 @@
         ${yet.length ? `<p class="muted">Yet to bat: ${yet.join(", ")}</p>` : ""}
         ${fow ? `<p class="muted"><b>Fall of wickets:</b> ${fow}</p>` : ""}
         <div class="table-wrap"><table class="tbl"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowl}</tbody></table></div>
-        <h2 class="eyebrow">Over by over</h2><ol class="overs-list">${overs}</ol>
+        <h2 class="eyebrow">Over by over</h2>${fixable ? `<p class="muted small">Scored a ball wrong? Tap it to fix it. Every total updates by itself.</p>` : ""}<ol class="overs-list">${overs}</ol>
+        ${CSA.ui.cardExtra(rec)}
       </section>`;
   }
 
@@ -364,6 +415,24 @@
       const a = g("op-striker"), b = g("op-non"), w = g("op-bowler");
       if (a === b) { const e = document.getElementById("op-error"); e.textContent = "Pick two different openers."; e.hidden = false; return; }
       push({ t: "openers", striker: a, nonStriker: b, bowler: w });
+    },
+    "fix-ball"(d) { openFix(+d.i); },
+    "fix-del"(d) { sheet.delivery = d.v; sheet.error = ""; renderSheet(); },
+    "fix-runs"(d) { sheet.runs = +d.v; renderSheet(); },
+    "fix-save"() {
+      const f = sheet;
+      applyFix((ev) => {
+        const e = Object.assign({}, ev[f.index], { runs: f.runs });
+        if (f.delivery === "legal") delete e.extra; else e.extra = f.delivery;
+        ev[f.index] = e;
+      });
+    },
+    "fix-delete"() {
+      if (!confirm("Remove this ball? Everything after it is worked out again.")) return;
+      const i = sheet.index;
+      // Kept as a blank entry rather than cut out, so every later ball keeps its place
+      // (and the change log shows exactly one removal).
+      applyFix((ev) => { ev[i] = { t: "void", was: ev[i] }; });
     },
     "o-del"(d) { sheet.delivery = d.v; renderSheet(); },
     "o-kind"(d) { sheet.wk = d.v; renderSheet(); },
@@ -413,6 +482,7 @@
     screens: {},
     homeTop: () => "",
     matchBadge: () => "",
+    cardExtra: () => "",
     changed: () => {},
     go(screen, extra) { closeSheet(); view = Object.assign({ screen, tab: 0 }, extra || {}); render(); },
     view: () => view,
