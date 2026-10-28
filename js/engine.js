@@ -141,17 +141,23 @@
   function apply(match, s, e, index) {
     if (s.result) return;
     const inn = s.innings[s.current];
+    // Events that no longer fit (after a ball before them was fixed or removed) are skipped,
+    // so a correction never leaves the match in a broken state.
     switch (e.t) {
       case "openers":
+        if (inn.batters.length) break;
         inn.striker = e.striker; inn.nonStriker = e.nonStriker;
         batterOf(inn, e.striker); batterOf(inn, e.nonStriker);
         if (e.bowler != null) { inn.bowler = e.bowler; bowlerOf(inn, e.bowler); }
         break;
       case "batter":
+        if (inn.striker != null && inn.nonStriker != null) break;
+        if (inn.batters.some((b) => b.player === e.player && (b.out ? b.out.kind !== "retired" : true))) break;
         if (inn.striker == null) inn.striker = e.player; else inn.nonStriker = e.player;
         batterOf(inn, e.player).out = null;
         break;
       case "bowler":
+        if (inn.bowler != null) break;
         inn.bowler = e.bowler; bowlerOf(inn, e.bowler);
         break;
       case "retire": {

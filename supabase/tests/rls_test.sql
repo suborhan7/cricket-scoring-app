@@ -78,5 +78,26 @@ do $$ begin
 end $$;
 select pg_temp.blocked($q$insert into public.tournaments (name) values ('Anon Cup')$q$);
 
+-- Organisers add people by email; nobody else can.
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+select public.add_member_by_email('10000000-0000-0000-0000-000000000001', '  Stranger@Example.com ', 'media');
+do $$ begin
+  if not exists (select 1 from public.tournament_members where user_id = '00000000-0000-0000-0000-00000000000c' and role = 'media') then raise exception 'organiser could not add by email'; end if;
+  if (select count(*) from public.tournament_members m join public.profiles p on p.id = m.user_id) < 3 then raise exception 'members are not linked to profiles'; end if;
+end $$;
+do $$ begin
+  perform public.add_member_by_email('10000000-0000-0000-0000-000000000001', 'nobody@example.com', 'scorer');
+  raise exception 'unknown email should fail';
+exception when no_data_found then null;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000b');
+do $$ begin
+  perform public.add_member_by_email('10000000-0000-0000-0000-000000000001', 'org@example.com', 'organiser');
+  raise exception 'a scorer should not be able to add people';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.act(null);
+select pg_temp.blocked($q$select public.add_member_by_email('10000000-0000-0000-0000-000000000001', 'org@example.com', 'scorer')$q$);
+
 reset role;
 \echo 'All security checks passed'

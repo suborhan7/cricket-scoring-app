@@ -269,10 +269,12 @@
     const t = T.t, tab = view.tab || "matches";
     const hero = `<div class="hero" style="--c1:${t.primary_color || "#0F7A45"};--c2:${t.secondary_color || "#0E1A14"}">
       ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2><p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
-    const tabs = `<div class="tabs">${[["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]]
+    const tabList = [["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]].concat(isOrganiser() ? [["people", "People"]] : []);
+    const tabs = `<div class="tabs">${tabList
       .map(([k, l]) => `<button class="tab ${tab === k ? "on" : ""}" data-act="tour-tab" data-t="${k}">${l}</button>`).join("")}</div>`;
     let body;
     if (tab === "table") body = tableTab(T);
+    else if (tab === "people") body = peopleTab(T);
     else if (tab === "stats") body = statsTab(T);
     else if (tab === "teams") {
       const groups = {};
@@ -296,6 +298,52 @@
     return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${share}</header>`
       + hero + `<section class="wrap stack">${tabs}${body}</section>`;
   };
+
+  // ---------- People: organisers, scorers and media ----------
+
+  const ROLE_TEXT = { organiser: "Organiser", scorer: "Scorer", media: "Media" };
+  const ROLE_HELP = { organiser: "can change everything", scorer: "can score and fix balls", media: "can make and share cards" };
+
+  async function loadPeople() {
+    const T = L.tour;
+    T.people = null; T.peopleError = "";
+    const { data, error } = await sb.from("tournament_members").select("role, user_id, profiles(display_name)").eq("tournament_id", T.id).order("added_at");
+    if (L.tour !== T) return;
+    if (error) T.peopleError = errText(error); else T.people = data;
+    rerender("tour");
+  }
+
+  function peopleTab(T) {
+    if (T.people === undefined) { loadPeople(); T.people = null; }
+    const f = form("people", { role: "scorer" });
+    const list = T.people == null ? `<p class="muted">${T.peopleError ? esc(T.peopleError) : "Loading…"}</p>`
+      : `<ul class="people">${T.people.map((m) => {
+        const nm = (m.profiles && m.profiles.display_name) || "Member", me = L.user && m.user_id === L.user.id;
+        return `<li class="person"><span class="avatar">${esc(nm.slice(0, 1).toUpperCase())}</span>
+          <span class="t-text"><b>${esc(nm)}${me ? " (you)" : ""}</b><small>${ROLE_TEXT[m.role]} · ${ROLE_HELP[m.role]}</small></span>
+          ${me ? "" : `<button class="icon-btn" data-act="person-remove" data-u="${m.user_id}" data-r="${m.role}" aria-label="Remove ${esc(nm)}">✕</button>`}</li>`;
+      }).join("")}</ul>`;
+    return list + `<div class="card stack-s">
+      <span class="eyebrow">Add someone</span>
+      <p class="muted small">They sign up in the app first, then you add them with the email they used.</p>
+      ${field("Their email", `<input id="person-email" data-f="people.email" type="email" inputmode="email" autocomplete="off" value="${esc(f.email || "")}">`)}
+      <div class="chips">${Object.keys(ROLE_TEXT).map((r) => `<button class="chip ${f.role === r ? "on" : ""}" data-act="person-role" data-r="${r}">${ROLE_TEXT[r]}</button>`).join("")}</div>
+      ${status(f)}
+      <button class="btn btn-primary" data-act="person-add" ${f.busy ? "disabled" : ""}>${f.busy ? "Adding…" : `Add as ${ROLE_TEXT[f.role].toLowerCase()}`}</button></div>`;
+  }
+
+  async function addPerson() {
+    const f = form("people");
+    f.email = ((document.getElementById("person-email") || {}).value || f.email || "").trim();
+    if (!/^\S+@\S+\.\S+$/.test(f.email)) { f.error = "Enter the email they signed up with."; return ui.render(); }
+    f.busy = true; f.error = ""; ui.render();
+    const { data, error } = await sb.rpc("add_member_by_email", { t: L.tour.id, member_email: f.email, member_role: f.role });
+    f.busy = false;
+    if (error) { f.error = error.message; return ui.render(); }
+    ui.toast(`${data.display_name || f.email} added as ${ROLE_TEXT[f.role].toLowerCase()}`);
+    L.forms.people = { role: f.role };
+    loadPeople();
+  }
 
   // ---------- Points table and leaders ----------
 
@@ -638,6 +686,45 @@
     await openMatch(hit[2]);
   }
 
+  // ---------- Change log ----------
+  // The database keeps every change to a saved ball (event_edits). Shown under the scorecard.
+
+  const changeLogs = {};
+  function describeEvent(e) {
+    if (!e || e.t === "void") return "removed";
+    if (e.t !== "ball") return { openers: "openers chosen", bowler: "bowler change", batter: "new batter", swap: "strike swapped", retire: "retired hurt", end: "innings ended" }[e.t] || e.t;
+    const r = e.runs || 0, x = { wd: "wide", nb: "no ball", b: "byes", lb: "leg byes" }[e.extra];
+    let t = x ? `${x}${r ? ` +${r}` : ""}` : `${r} run${r === 1 ? "" : "s"}`;
+    if (e.wicket && e.wicket.kind !== "retired") t += `, ${E.WICKET_KINDS[e.wicket.kind].toLowerCase()}`;
+    return t;
+  }
+
+  ui.cardExtra = (rec) => {
+    if (!rec.match.cloud || rec.readOnly) return "";
+    const log = changeLogs[rec.match.id];
+    if (!log) return `<button class="btn btn-ghost" data-act="show-log">Show change log</button>`;
+    if (log.loading) return `<p class="muted">Loading changes…</p>`;
+    if (log.error) return `<p class="error">${esc(log.error)}</p>`;
+    if (!log.rows.length) return `<h2 class="eyebrow">Change log</h2><p class="muted">No saved ball has been changed.</p>`;
+    return `<h2 class="eyebrow">Change log</h2><ol class="people">${log.rows.map((r) => `<li class="person"><span class="t-text">
+      <b>Entry ${r.seq + 1}: ${esc(describeEvent(r.old_event))} → ${esc(describeEvent(r.new_event))}</b>
+      <small>${esc(log.names[r.edited_by] || "Someone")} · ${new Date(r.edited_at).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small></span></li>`).join("")}</ol>`;
+  };
+
+  async function loadLog(rec) {
+    const id = rec.match.id, log = changeLogs[id] = { loading: true };
+    ui.render();
+    const { data, error } = await sb.from("event_edits").select("*").eq("match_id", rec.match.cloud.matchId).order("edited_at", { ascending: false }).limit(100);
+    if (error) { log.loading = false; log.error = errText(error); return ui.render(); }
+    const ids = [...new Set(data.map((r) => r.edited_by).filter(Boolean))];
+    const people = ids.length ? await sb.from("profiles").select("id, display_name").in("id", ids) : { data: [] };
+    log.names = Object.fromEntries((people.data || []).map((p) => [p.id, p.display_name]));
+    // Undo while scoring also shows up as a removal; keep only changes to balls, which is what people look for.
+    log.rows = data.filter((r) => (r.old_event && r.old_event.t === "ball") || (r.new_event && r.new_event.t === "ball"));
+    log.loading = false;
+    ui.render();
+  }
+
   // ---------- Actions and inputs ----------
 
   Object.assign(ui.actions, {
@@ -650,6 +737,15 @@
     "tnew-custom"() { form("tnew").custom = true; ui.render(); },
     "tnew-save": saveTournament,
     "t-open"(d) { openTour(d.id); },
+    "show-log"() { const rec = ui.current(); if (rec) loadLog(rec); },
+    "person-role"(d) { form("people").role = d.r; ui.render(); },
+    "person-add": addPerson,
+    async "person-remove"(d) {
+      if (!confirm(`Remove this ${ROLE_TEXT[d.r].toLowerCase()} from the tournament?`)) return;
+      const { error } = await sb.from("tournament_members").delete().eq("tournament_id", L.tour.id).eq("user_id", d.u).eq("role", d.r);
+      if (error) return ui.toast(errText(error));
+      loadPeople();
+    },
     "tour-tab"(d) { L.tour.tab = d.t; ui.go("tour", { id: L.tour.id, tab: d.t }); },
     "team-new"() { L.forms.teamnew = null; ui.go("teamnew"); },
     "team-save": saveTeam,

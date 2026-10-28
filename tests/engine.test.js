@@ -127,3 +127,26 @@ test("retired hurt is not a wicket and the batter can come back", () => {
   assert.equal(s.innings[0].batters[0].out, null);
   assert.equal(s.innings[0].batters[0].runs, 2);
 });
+
+test("removing or fixing an old ball replays cleanly", () => {
+  const out = { kind: "bowled" };
+  const ev = [...start, ball(1), ball(0, null, out), { t: "batter", player: 2 }, ball(4)];
+  let s = E.replay(match(), ev);
+  assert.equal(s.innings[0].wickets, 1);
+  // Remove the wicket ball: the original batter stays in and the later "new batter" is skipped.
+  const removed = ev.slice(); removed[2] = { t: "void", was: ev[2] };
+  s = E.replay(match(), removed);
+  const inn = s.innings[0];
+  assert.equal(inn.wickets, 0);
+  assert.equal(inn.runs, 5);
+  assert.deepEqual([inn.striker, inn.nonStriker].sort(), [0, 1]);
+  assert.equal(inn.batters.length, 2);
+  // Change the single to a two: strike changes and every later total follows.
+  const fixed = ev.slice(); fixed[1] = ball(2);
+  s = E.replay(match(), fixed);
+  assert.equal(s.innings[0].runs, 6);
+  // Player 1 keeps strike after the two, so they are the one bowled; player 3 hits the four.
+  assert.equal(s.innings[0].batters[0].runs, 2);
+  assert.equal(s.innings[0].batters[0].out.kind, "bowled");
+  assert.equal(s.innings[0].batters.find((b) => b.player === 2).runs, 4);
+});
