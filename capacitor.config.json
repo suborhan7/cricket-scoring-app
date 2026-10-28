@@ -3,7 +3,7 @@
   "appName": "Cricket Scorer",
   "webDir": "www",
   "server": {
-    "url": "https://cricket-scoring-app.vercel.app",
+    "url": "https://cricket-scoring-app-two.vercel.app",
     "androidScheme": "https",
     "errorPath": "offline.html"
   },
