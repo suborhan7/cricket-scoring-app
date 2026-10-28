@@ -226,7 +226,7 @@
       action = pickList(`Over ${Math.floor(inn.legalBalls / rules().ballsPerOver) + 1}: who bowls?`, inn.bowling, ok.length ? ok : t[inn.bowling].players.map((_, i) => i), "pick-bowler");
     } else if (s.next === "ball") action = keypad();
     else action = `<div class="result"><p class="result-text">${esc(s.result.text)}</p>
-      <button class="btn btn-primary btn-big" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="home">All matches</button></div>`;
+      <button class="btn btn-primary btn-big" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="match-back">All matches</button></div>`;
 
     let tools = s.next === "done" ? "" : `<div class="tools">
         <button class="btn btn-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}>Undo</button>

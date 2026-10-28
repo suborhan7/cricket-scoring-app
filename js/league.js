@@ -20,6 +20,10 @@
   const rerender = (...names) => { if (onScreen(...names)) ui.render(); };
   const displayName = () => (L.user && ((L.user.user_metadata && L.user.user_metadata.full_name) || L.user.email)) || "";
 
+  const SHARE_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
+  // Links like …/#/t/<id> and …/#/m/<id> open a tournament or a match straight away.
+  const shareUrl = (kind, id) => `${location.origin}${location.pathname}#/${kind}/${id}`;
+
   function bar(title, back, extra) {
     return `<header class="bar"><button class="icon-btn" data-act="${back || "home"}" ${extra || ""} aria-label="Back">←</button><h1>${title}</h1></header>`;
   }
@@ -43,7 +47,8 @@
     L.mine = null;
     if (L.user) { loadMine(); syncPending(); } else ui.render();
   }
-  sb.auth.getSession().then(({ data }) => setUser(data.session && data.session.user));
+  sb.auth.getSession().then(({ data }) => { setUser(data.session && data.session.user); openLink(); });
+  window.addEventListener("hashchange", openLink);
   sb.auth.onAuthStateChange((_e, session) => setUser(session && session.user));
 
   async function loadMine() {
@@ -73,7 +78,7 @@
     }
     const roleText = (r) => (r.includes("organiser") ? "Organiser" : r.includes("scorer") ? "Scorer" : "Media");
     const rows = (L.mine || []).map((t) => `<li><button class="t-row" data-act="t-open" data-id="${t.id}">${badge(t)}
-        <span class="t-text"><b>${esc(t.name)}</b><small>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} overs · ${roleText(t.roles)}</small></span></button></li>`).join("");
+        <span class="t-text"><b>${esc(t.name)}</b><small>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} · ${roleText(t.roles)}</small></span></button></li>`).join("");
     const body = L.mine == null ? `<p class="muted">${L.mineLoading ? "Loading your tournaments…" : esc(L.mineError)}</p>`
       : rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No tournaments yet. Create one, or ask an organiser to add you as a scorer.</p>`;
     return `<div class="stack-s">
@@ -263,10 +268,13 @@
     if (T.error || !T.t) return bar("Tournament") + `<section class="wrap stack"><p class="error">${esc(T.error || "Tournament not found.")}</p><button class="btn" data-act="t-open" data-id="${T.id}">Try again</button></section>`;
     const t = T.t, tab = view.tab || "matches";
     const hero = `<div class="hero" style="--c1:${t.primary_color || "#0F7A45"};--c2:${t.secondary_color || "#0E1A14"}">
-      ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2><p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} overs a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
-    const tabs = `<div class="tabs"><button class="tab ${tab === "matches" ? "on" : ""}" data-act="tour-tab" data-t="matches">Matches</button><button class="tab ${tab === "teams" ? "on" : ""}" data-act="tour-tab" data-t="teams">Teams</button></div>`;
+      ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2><p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
+    const tabs = `<div class="tabs">${[["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]]
+      .map(([k, l]) => `<button class="tab ${tab === k ? "on" : ""}" data-act="tour-tab" data-t="${k}">${l}</button>`).join("")}</div>`;
     let body;
-    if (tab === "teams") {
+    if (tab === "table") body = tableTab(T);
+    else if (tab === "stats") body = statsTab(T);
+    else if (tab === "teams") {
       const groups = {};
       for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm);
       const names = Object.keys(groups).sort();
@@ -284,8 +292,51 @@
       body = (rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No matches yet.${isOrganiser() ? (T.teams.length < 2 ? " Add at least two teams first." : " Add the first fixture.") : ""}</p>`)
         + (isOrganiser() && T.teams.length >= 2 ? `<button class="btn btn-primary" data-act="match-new">New match</button>` : "");
     }
-    return bar(esc(t.short_name || t.name)) + hero + `<section class="wrap stack">${tabs}${body}</section>`;
+    const share = `<button class="icon-btn" data-act="share" data-kind="t" data-id="${t.id}" data-title="${esc(t.name)}" aria-label="Share">${SHARE_ICON}</button>`;
+    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${share}</header>`
+      + hero + `<section class="wrap stack">${tabs}${body}</section>`;
   };
+
+  // ---------- Points table and leaders ----------
+
+  const nrrText = (x) => (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(3);
+  // Group matches decide the table; in a series every match counts.
+  const tableMatches = (T) => T.matches.filter((m) => T.t.kind === "series" || m.stage === "group");
+
+  function tableTab(T) {
+    if (T.teams.length < 2) return `<p class="muted">The table shows up once there are teams and results.</p>`;
+    const groups = {};
+    for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm.id);
+    const ms = tableMatches(T);
+    const tables = Object.keys(groups).sort().map((g) => {
+      const rows = CSA.stats.pointsTable(groups[g], ms);
+      const showT = rows.some((r) => r.t), showNr = rows.some((r) => r.nr);
+      const head = `<tr><th>${g ? `Group ${esc(g)}` : "Team"}</th><th>P</th><th>W</th><th>L</th>${showT ? "<th>T</th>" : ""}${showNr ? "<th>NR</th>" : ""}<th>Pts</th><th>NRR</th></tr>`;
+      const body = rows.map((r, i) => {
+        const tm = teamById(r.id);
+        return `<tr><td><span class="tbl-team"><span class="pos">${i + 1}</span>${badge(tm)}<b>${esc(tm.short_name)}</b></span></td><td>${r.p}</td><td>${r.w}</td><td>${r.l}</td>${showT ? `<td>${r.t}</td>` : ""}${showNr ? `<td>${r.nr}</td>` : ""}<td class="pts">${r.pts}</td><td>${nrrText(r.nrr)}</td></tr>`;
+      }).join("");
+      return `<div class="table-wrap"><table class="tbl tbl-points"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    }).join("");
+    const done = ms.filter((m) => m.status === "done" || m.status === "abandoned").length;
+    return tables + `<p class="muted small">${done ? `From ${done} finished match${done === 1 ? "" : "es"}.` : "No results yet."} Win 2 points, tie or no result 1. NRR counts an all-out side as facing its full overs.</p>`;
+  }
+
+  function statsTab(T) {
+    const L2 = CSA.stats.leaders(T.matches);
+    if (!L2.runs.length) return `<p class="muted">Run and wicket leaders show up after the first finished match.</p>`;
+    const row = (x, i, big, small) => {
+      const tm = teamById(x.teamId);
+      return `<li class="leader${i === 0 ? " leader-top" : ""}"><span class="pos">${i + 1}</span>${badge(tm)}
+        <span class="t-text"><b>${esc(x.name)}</b><small>${esc(tm.short_name)} · ${small}</small></span><span class="leader-n">${big}</span></li>`;
+    };
+    const runs = L2.runs.slice(0, 10).map((x, i) => row(x, i, x.runs,
+      `${x.inns} inn · SR ${x.sr.toFixed(1)}${x.avg != null ? ` · Avg ${x.avg.toFixed(1)}` : ""} · Best ${x.best}${x.bestOut ? "" : "*"}`)).join("");
+    const wkts = L2.wickets.filter((x) => x.wickets > 0).slice(0, 10).map((x, i) => row(x, i, x.wickets,
+      `${x.overs} ov · Econ ${x.econ.toFixed(2)} · Best ${x.bestW}/${x.bestR}`)).join("");
+    return `<h2 class="eyebrow">Most runs</h2><ol class="leaders">${runs}</ol>
+      <h2 class="eyebrow">Most wickets</h2>${wkts ? `<ol class="leaders">${wkts}</ol>` : `<p class="muted">No wickets yet.</p>`}`;
+  }
 
   // ---------- New team ----------
 
@@ -409,7 +460,7 @@
       match: {
         id: m.id, createdAt: Date.now(), teams: [team(m.team1_id, 0), team(m.team2_id, 1)],
         battingFirst: m.batting_first || 0, toss: m.toss || { winner: 0, decision: "bat" }, rules: m.rules && m.rules.oversPerSide ? m.rules : rulesOf(L.tour.t),
-        cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id] },
+        cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id], playerIds: m.lineups ? m.lineups.teams.map((x) => x.players) : null },
       },
       events: [],
     };
@@ -477,9 +528,11 @@
 
   ui.matchBadge = (rec) => {
     if (!rec.match.cloud) return "";
-    if (rec.readOnly) return `<span class="sync sync-saved">${rec.cloudStatus === "done" ? "Final" : "Live"}</span>`;
+    const t = rec.match.teams;
+    const share = `<button class="icon-btn" data-act="share" data-kind="m" data-id="${rec.match.cloud.matchId}" data-title="${esc(`${t[0].name} v ${t[1].name}`)}" aria-label="Share live score">${SHARE_ICON}</button>`;
+    if (rec.readOnly) return `<span class="sync sync-saved">${rec.cloudStatus === "done" ? "Final" : "Live"}</span>${share}`;
     const state = L.badge[rec.match.id] || (pending(rec) ? "saving" : "saved");
-    return `<span class="sync sync-${state}" id="sync-badge">${BADGES[state]}</span>`;
+    return `<span class="sync sync-${state}" id="sync-badge">${BADGES[state]}</span>${share}`;
   };
 
   function setBadge(rec, state) {
@@ -517,13 +570,23 @@
         if (error) throw error;
       }
       const s = E.replay(rec.match, ev), status = s.result ? "done" : "live";
-      if (status !== rec.cloudStatus) {
+      const statusChanged = status !== rec.cloudStatus;
+      if (statusChanged) {
         const upd = { status, result_text: s.result ? s.result.text : null, winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null };
         const { error } = await sb.from("matches").update(upd).eq("id", id);
         if (error) throw error;
         rec.cloudStatus = status;
         const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
         if (m) Object.assign(m, upd);
+      }
+      // The points table and leaders read this summary. It goes separately so that a database
+      // without the summary column (migration 0002 not run yet) still syncs every ball.
+      if (s.result && (statusChanged || rows.length || prev.length > ev.length)) {
+        const summary = CSA.stats.summarize(rec.match, s, rec.match.cloud.playerIds);
+        const { error } = await sb.from("matches").update({ summary }).eq("id", id);
+        if (error) console.warn("Match summary not saved:", error.message);
+        const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
+        if (m && !error) m.summary = summary;
       }
       rec.synced = ev.map((e) => JSON.stringify(e));
       const cur = S.get(rec.match.id);
@@ -540,6 +603,40 @@
     for (const r of S.list()) if (r.match.cloud && !r.readOnly && pending(r)) syncRec(r);
   }
   window.addEventListener("online", syncPending);
+
+  // A fan watching a live match gets new balls every 15 seconds while the screen is open.
+  async function refreshWatched(quiet) {
+    const rec = ui.current();
+    if (!rec || !rec.match.cloud || !rec.readOnly) return;
+    const id = rec.match.cloud.matchId;
+    const [m, events] = await Promise.all([
+      sb.from("matches").select("status").eq("id", id).single(),
+      sb.from("match_events").select("seq, event").eq("match_id", id).order("seq"),
+    ]);
+    if (m.error || events.error) { if (!quiet) ui.toast(errText(m.error || events.error)); return; }
+    if (ui.current() !== rec) return;
+    const changed = events.data.length !== rec.events.length || m.data.status !== rec.cloudStatus;
+    rec.events = events.data.map((r) => r.event);
+    rec.cloudStatus = m.data.status;
+    if (changed && onScreen("score", "card")) ui.render();
+    else if (!quiet) ui.toast("Up to date");
+  }
+  setInterval(() => {
+    const rec = ui.current();
+    if (document.visibilityState === "visible" && rec && rec.readOnly && rec.cloudStatus === "live" && onScreen("score", "card")) refreshWatched(true);
+  }, 15000);
+
+  // Opens a shared link once the sign-in state is known (so scorers get the pad, fans the score).
+  async function openLink() {
+    const hit = /^#\/(t|m)\/([0-9a-f-]{36})$/i.exec(location.hash);
+    if (!hit) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    if (hit[1] === "t") return openTour(hit[2]);
+    const { data, error } = await sb.from("matches").select("tournament_id").eq("id", hit[2]).single();
+    if (error) return ui.toast("That match link doesn't work any more.");
+    await openTour(data.tournament_id, "matches");
+    await openMatch(hit[2]);
+  }
 
   // ---------- Actions and inputs ----------
 
@@ -567,12 +664,17 @@
       if (rec && rec.match.cloud) openTour(rec.match.cloud.tournamentId, "matches");
       else ui.actions.home();
     },
-    async "refresh-match"() {
-      const rec = ui.current();
-      if (!rec || !rec.match.cloud) return;
-      const { data, error } = await sb.from("matches").select("*").eq("id", rec.match.cloud.matchId).single();
-      if (error) return ui.toast(errText(error));
-      await watchMatch(data, true);
+    "refresh-match"() { refreshWatched(false); },
+    async share(d) {
+      const url = shareUrl(d.kind, d.id), title = d.title || "Live score";
+      try {
+        if (navigator.share) return await navigator.share({ title, text: d.kind === "m" ? `${title}: live score` : title, url });
+        await navigator.clipboard.writeText(url);
+        ui.toast("Link copied. Paste it in WhatsApp or Messenger.");
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+        window.prompt("Copy this link", url);
+      }
     },
   });
 
