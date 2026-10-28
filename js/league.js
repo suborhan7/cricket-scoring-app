@@ -22,6 +22,7 @@
 
   const SHARE_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
   // Links like …/#/t/<id> and …/#/m/<id> open a tournament or a match straight away.
+  const EDIT_ICON = `<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
   const shareUrl = (kind, id) => `${location.origin}${location.pathname}#/${kind}/${id}`;
 
   function bar(title, back, extra) {
@@ -221,9 +222,16 @@
   ui.screens.tnew = () => {
     const f = form("tnew", { kind: "tournament", overs: 20, custom: false, maxBowler: 4, c1: "#0F7A45", c2: "#0E1A14" });
     const chips = ui.PRESETS.map(([l, n]) => `<button class="chip ${!f.custom && +f.overs === n ? "on" : ""}" data-act="tnew-overs" data-n="${n}">${l}</button>`).join("");
-    return bar("New tournament") + `<section class="wrap stack">
+    const editing = !!f.editId;
+    const sponsor = editing ? `<div class="card stack-s"><span class="eyebrow">Sponsor on cards</span>
+        <div class="chips"><button class="chip ${f.showSponsor ? "on" : ""}" data-act="tnew-sponsor" data-v="1">Show sponsor</button><button class="chip ${f.showSponsor ? "" : "on"}" data-act="tnew-sponsor" data-v="0">Hide</button></div>
+        ${f.showSponsor ? `${field("Sponsor name", `<input data-f="tnew.sponsorName" value="${esc(f.sponsorName || "")}" maxlength="40" placeholder="Leave empty to show a sample">`)}
+        <div class="logo-pick">${f.sponsorUrl ? `<img class="logo logo-l" src="${f.sponsorUrl}" alt="Sponsor logo preview">` : `<span class="logo logo-l logo-empty">Logo</span>`}
+          <label class="btn btn-small file-btn">${f.sponsorUrl ? "Change sponsor logo" : "Upload sponsor logo"}<input type="file" accept="image/*" data-sponsor="1" hidden></label></div>` : ""}
+      </div>` : "";
+    return bar(editing ? "Edit tournament" : "New tournament", editing ? "t-open" : "home", editing ? `data-id="${f.editId}"` : "") + `<section class="wrap stack">
       <div class="card stack-s">
-        <div class="chips"><button class="chip ${f.kind === "tournament" ? "on" : ""}" data-act="tnew-kind" data-k="tournament">Tournament</button><button class="chip ${f.kind === "series" ? "on" : ""}" data-act="tnew-kind" data-k="series">Series (two teams)</button></div>
+        ${editing ? "" : `<div class="chips"><button class="chip ${f.kind === "tournament" ? "on" : ""}" data-act="tnew-kind" data-k="tournament">Tournament</button><button class="chip ${f.kind === "series" ? "on" : ""}" data-act="tnew-kind" data-k="series">Series (two teams)</button></div>`}
         ${field("Name", `<input id="tnew-name" data-f="tnew.name" value="${esc(f.name || "")}" placeholder="e.g. Winter Cup 2026" maxlength="80">`)}
         ${field("Short name", `<input id="tnew-short" data-f="tnew.short" value="${esc(f.short || "")}" placeholder="e.g. WC26" maxlength="12">`, "Shown on cards and score bars.")}
       </div>
@@ -232,9 +240,11 @@
         <div class="chips">${chips}<button class="chip ${f.custom ? "on" : ""}" data-act="tnew-custom">Custom</button></div>
         ${f.custom ? field("Overs per side", `<input id="tnew-overs" data-f="tnew.overs" type="number" inputmode="numeric" min="1" max="100" value="${esc(f.overs)}">`) : ""}
         ${field("Max overs per bowler", `<input id="tnew-max" data-f="tnew.maxBowler" type="number" inputmode="numeric" min="1" value="${esc(f.maxBowler)}">`)}
+        ${editing ? `<small class="muted">Changes apply to matches that haven't started.</small>` : ""}
       </div>
+      ${sponsor}
       ${status(f)}
-      <button class="btn btn-primary btn-big" data-act="tnew-save" ${f.busy ? "disabled" : ""}>${f.busy ? "Creating…" : "Create"}</button>
+      <button class="btn btn-primary btn-big" data-act="tnew-save" ${f.busy ? "disabled" : ""}>${f.busy ? (editing ? "Saving…" : "Creating…") : editing ? "Save" : "Create"}</button>
     </section>`;
   };
 
@@ -246,12 +256,27 @@
     if (!(overs >= 1 && overs <= 100)) { f.error = "Overs per side must be between 1 and 100."; return ui.render(); }
     f.busy = true; f.error = ""; ui.render();
     try {
-      const logo_path = f.logoBlob ? await upload("logos", f.logoBlob) : null;
-      const { data, error } = await sb.from("tournaments").insert({
-        name, short_name: (f.short || "").trim() || null, kind: f.kind, logo_path,
-        primary_color: f.c1, secondary_color: f.c2, overs_per_side: overs,
+      const row = {
+        name, short_name: (f.short || "").trim() || null, primary_color: f.c1, secondary_color: f.c2, overs_per_side: overs,
         max_overs_per_bowler: Math.max(1, parseInt(f.maxBowler, 10) || Math.ceil(overs / 5)),
-      }).select().single();
+      };
+      if (f.logoBlob) row.logo_path = await upload("logos", f.logoBlob);
+      if (f.editId) {
+        const { error } = await sb.from("tournaments").update(row).eq("id", f.editId);
+        if (error) throw error;
+        // Sponsor fields go separately: they need migration 0007, and the rest should save without it.
+        const sp = { show_sponsor: !!f.showSponsor, sponsor_name: (f.sponsorName || "").trim() || null };
+        if (f.sponsorBlob) sp.sponsor_logo_path = await upload("logos", f.sponsorBlob);
+        const r2 = await sb.from("tournaments").update(sp).eq("id", f.editId);
+        if (r2.error) ui.toast("Saved. The sponsor settings need a database update first.");
+        else ui.toast("Tournament saved");
+        const id = f.editId;
+        L.forms.tnew = null;
+        loadMine();
+        return openTour(id);
+      }
+      row.kind = f.kind;
+      const { data, error } = await sb.from("tournaments").insert(row).select().single();
       if (error) throw error;
       L.forms.tnew = null;
       loadMine();
@@ -292,12 +317,14 @@
     const t = T.t, tab = view.tab || "matches";
     const hero = `<div class="hero" style="--c1:${t.primary_color || "#0F7A45"};--c2:${t.secondary_color || "#0E1A14"}">
       ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2><p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
-    const tabList = [["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]].concat(isOrganiser() ? [["people", "People"]] : []);
+    const tabList = [["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]]
+      .concat(T.roles.length && CSA.studio ? [["cards", "Cards"]] : [], isOrganiser() ? [["people", "People"]] : []);
     const tabs = `<div class="tabs">${tabList
       .map(([k, l]) => `<button class="tab ${tab === k ? "on" : ""}" data-act="tour-tab" data-t="${k}">${l}</button>`).join("")}</div>`;
     let body;
     if (tab === "table") body = tableTab(T);
     else if (tab === "people") body = peopleTab(T);
+    else if (tab === "cards" && CSA.studio) body = CSA.studio.tab(T);
     else if (tab === "stats") body = statsTab(T);
     else if (tab === "teams") {
       const groups = {};
@@ -317,8 +344,9 @@
       body = (rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No matches yet.${isOrganiser() ? (T.teams.length < 2 ? " Add at least two teams first." : " Add the first fixture.") : ""}</p>`)
         + (isOrganiser() && T.teams.length >= 2 ? `<button class="btn btn-primary" data-act="match-new">New match</button>` : "");
     }
+    const edit = isOrganiser() ? `<button class="icon-btn" data-act="t-edit" aria-label="Edit tournament">${EDIT_ICON}</button>` : "";
     const share = `<button class="icon-btn" data-act="share" data-kind="t" data-id="${t.id}" data-title="${esc(t.name)}" aria-label="Share">${SHARE_ICON}</button>`;
-    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${share}</header>`
+    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${edit}${share}</header>`
       + hero + `<section class="wrap stack">${tabs}${body}</section>`;
   };
 
@@ -765,11 +793,19 @@
     account() { ui.go("account"); },
     "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; ui.render(); },
     async "sign-out"() { await sb.auth.signOut(); ui.toast("Signed out"); ui.go("home"); },
-    "t-new"() { if (needUser()) ui.go("tnew"); },
     "tnew-kind"(d) { form("tnew").kind = d.k; ui.render(); },
     "tnew-overs"(d) { const f = form("tnew"); f.custom = false; f.overs = +d.n; f.maxBowler = Math.ceil(f.overs / 5); ui.render(); },
     "tnew-custom"() { form("tnew").custom = true; ui.render(); },
     "tnew-save": saveTournament,
+    "t-new"() { L.forms.tnew = null; if (needUser()) ui.go("tnew"); },
+    "t-edit"() {
+      const t = L.tour.t, preset = ui.PRESETS.some(([, n]) => n === t.overs_per_side);
+      L.forms.tnew = { editId: t.id, kind: t.kind, name: t.name, short: t.short_name || "", c1: t.primary_color || "#0F7A45", c2: t.secondary_color || "#0E1A14", colorsEdited: true,
+        logoUrl: t.logo_path ? publicUrl("logos", t.logo_path) : "", overs: t.overs_per_side, custom: !preset, maxBowler: t.max_overs_per_bowler || Math.ceil(t.overs_per_side / 5),
+        showSponsor: t.show_sponsor !== false, sponsorName: t.sponsor_name || "", sponsorUrl: t.sponsor_logo_path ? publicUrl("logos", t.sponsor_logo_path) : "" };
+      ui.go("tnew");
+    },
+    "tnew-sponsor"(d) { form("tnew").showSponsor = d.v === "1"; ui.render(); },
     "t-open"(d) { openTour(d.id); },
     "show-log"() { const rec = ui.current(); if (rec) loadLog(rec); },
     "person-role"(d) { form("people").role = d.r; ui.render(); },
@@ -823,6 +859,10 @@
   document.addEventListener("change", (ev) => {
     const t = ev.target;
     if (t.dataset.logo) pickLogo(t, form(t.dataset.logo), t.dataset.logo);
+    if (t.dataset.sponsor && t.files && t.files[0]) {
+      shrink(t.files[0], 512).then((out) => { const f = form("tnew"); f.sponsorBlob = out.blob; f.sponsorUrl = out.url; ui.render(); })
+        .catch(() => ui.toast("That file couldn't be read as an image."));
+    }
     if (t.dataset.csv && t.files && t.files[0]) {
       t.files[0].text().then((txt) => {
         const f = form(t.dataset.csv), n = parsePlayers(txt).length;
