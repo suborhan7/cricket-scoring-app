@@ -12,6 +12,8 @@
     tour: null,      // the open tournament: { id, t, teams, matches, roles, loading, error }
     forms: {},       // form state by screen, kept as people type (see the input listener)
     badge: {},       // sync state per match id
+    me: undefined,   // the signed-in user's own player profile: undefined while loading, null if none yet
+    myTeams: null,   // teams they created, captain or play for
   };
 
   const publicUrl = (bucket, path) => (path ? `${cfg.supabaseUrl}/storage/v1/object/public/${bucket}/${path}` : "");
@@ -39,21 +41,30 @@
       : `<span class="logo logo-${size || "s"} logo-initials" style="${style}">${initials}</span>`;
   }
 
+  // Opens the phone's share sheet, or copies the link where there is none.
+  async function shareLink(title, text, url, copied) {
+    try {
+      if (navigator.share) return await navigator.share({ title, text, url });
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      ui.toast(copied || "Link copied");
+    } catch (e) { if (!e || e.name !== "AbortError") window.prompt("Copy this link", url); }
+  }
+
   // ---------- Accounts ----------
 
   function setUser(u) {
     const changed = (u && u.id) !== (L.user && L.user.id);
     L.user = u || null;
     if (!changed) return;
-    L.mine = null;
-    if (L.user) { loadMine(); syncPending(); } else ui.render();
+    L.mine = null; L.me = undefined; L.myTeams = null;
+    if (L.user) { loadMine(); loadMe(); syncPending(); } else ui.render();
   }
   sb.auth.getSession().then(({ data }) => { setUser(data.session && data.session.user); openLink(); });
   window.addEventListener("hashchange", openLink);
   sb.auth.onAuthStateChange((_e, session) => setUser(session && session.user));
 
   async function loadMine() {
-    L.mineLoading = true; rerender("home");
+    L.mineLoading = true; rerender("home", "tours");
     const { data, error } = await sb.from("tournament_members").select("role, tournaments(*)").eq("user_id", L.user.id);
     L.mineLoading = false;
     if (error) L.mineError = errText(error);
@@ -67,7 +78,44 @@
       L.mine = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
       L.mineError = "";
     }
-    rerender("home");
+    rerender("home", "tours");
+  }
+
+  // ---------- My player profile and my teams ----------
+
+  const TEAM_COLS = "id, name, short_name, logo_path, primary_color, secondary_color, captain_player_id, created_by, team_players(count)";
+
+  async function loadMe() {
+    const uid = L.user && L.user.id;
+    if (!uid) return;
+    const { data, error } = await sb.from("players").select("*").eq("claimed_by", uid).maybeSingle();
+    if (!L.user || L.user.id !== uid) return;
+    L.me = error ? L.me || null : data;
+    await loadMyTeams();
+    if (CSA.hub) CSA.hub.meLoaded();
+  }
+
+  // Teams the user created, captains, or plays in. `manage` marks the ones they can run.
+  async function loadMyTeams() {
+    const uid = L.user && L.user.id, me = L.me;
+    if (!uid) return;
+    const none = Promise.resolve({ data: [] });
+    const [own, cap, squad] = await Promise.all([
+      sb.from("teams").select(TEAM_COLS).eq("created_by", uid),
+      me ? sb.from("teams").select(TEAM_COLS).eq("captain_player_id", me.id) : none,
+      me ? sb.from("team_players").select(`teams(${TEAM_COLS})`).eq("player_id", me.id) : none,
+    ]);
+    if (!L.user || L.user.id !== uid) return;
+    const byId = new Map();
+    for (const t of [].concat(own.data || [], cap.data || [], (squad.data || []).map((r) => r.teams).filter(Boolean))) {
+      byId.set(t.id, Object.assign(t, {
+        count: (t.team_players && t.team_players[0] ? t.team_players[0].count : 0),
+        manage: t.created_by === uid || (!!me && t.captain_player_id === me.id),
+        captain: !!me && t.captain_player_id === me.id,
+      }));
+    }
+    L.myTeams = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+    rerender("home", "teams", "profile");
   }
 
   // ---------- Live and recent matches (everyone, signed in or not) ----------
@@ -96,26 +144,6 @@
         <span class="feed-team ${m.winner_team_id && m.winner_team_id === m.team2_id ? "won" : ""}">${badge(m.b)}<b>${esc(m.b.short_name)}</b><span>${score(m, 1)}</span></span>
         <small class="feed-result">${esc(m.status === "live" ? "In progress" : m.result_text || "")}</small></button></li>`).join("");
     return `<div class="stack-s"><h2 class="eyebrow">Live and recent</h2><ul class="feed">${rows}</ul></div>`;
-  }
-
-  ui.homeTop = () => homeMine() + feedHtml();
-
-  function homeMine() {
-    if (!L.user) {
-      return `<div class="card promo stack-s">
-        <h2 class="promo-title">Run a tournament</h2>
-        <p class="muted">Create a tournament or series, add teams with logos, and score matches everyone can follow live.</p>
-        <button class="btn btn-primary btn-big" data-act="account">Sign in or create account</button></div>`;
-    }
-    const roleText = (r) => (r.includes("organiser") ? "Organiser" : r.includes("scorer") ? "Scorer" : "Media");
-    const rows = (L.mine || []).map((t) => `<li><button class="t-row" data-act="t-open" data-id="${t.id}">${badge(t)}
-        <span class="t-text"><b>${esc(t.name)}</b><small>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} · ${roleText(t.roles)}</small></span></button></li>`).join("");
-    const body = L.mine == null ? `<p class="muted">${L.mineLoading ? "Loading your tournaments…" : esc(L.mineError)}</p>`
-      : rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No tournaments yet. Create one, or ask an organiser to add you as a scorer.</p>`;
-    return `<div class="stack-s">
-      <div class="row-between"><h2 class="eyebrow">Your tournaments</h2><span class="row-end">${CSA.alerts ? CSA.alerts.bell() : ""}<button class="link-btn" data-act="account">${esc(displayName())}</button></span></div>
-      ${body}
-      <button class="btn btn-primary btn-big" data-act="t-new">New tournament or series</button></div>`;
   }
 
   ui.screens.account = () => {
@@ -168,8 +196,10 @@
     if (res.error) { f.error = res.error.message; return ui.render(); }
     if (!res.data.session) { f.note = "Account created. Check your email for a confirmation link, then sign in."; f.mode = "in"; return ui.render(); }
     L.forms.account = null;
-    ui.toast(up ? "Welcome! Your account is ready." : "Signed in");
-    ui.go("home");
+    ui.toast(up ? "Welcome! Set up your player profile." : "Signed in");
+    // A new account goes straight to setting up the player profile.
+    ui.lastTab = up ? "profile" : "home";
+    ui.go(ui.lastTab);
   }
 
   // ---------- Small form helpers ----------
@@ -283,7 +313,10 @@
         ${editing ? "" : `<div class="chips"><button class="chip ${f.kind === "tournament" ? "on" : ""}" data-act="tnew-kind" data-k="tournament">Tournament</button><button class="chip ${f.kind === "series" ? "on" : ""}" data-act="tnew-kind" data-k="series">Series (two teams)</button></div>`}
         ${field("Name", `<input id="tnew-name" data-f="tnew.name" value="${esc(f.name || "")}" placeholder="e.g. Winter Cup 2026" maxlength="80">`)}
         ${field("Short name", `<input id="tnew-short" data-f="tnew.short" value="${esc(f.short || "")}" placeholder="e.g. WC26" maxlength="12">`, "Shown on cards and score bars.")}
+        ${field("Username", `<span class="handle-input"><span>@</span><input id="tnew-handle" data-f="tnew.handle" value="${esc(f.handle || "")}" placeholder="e.g. wintercup26" maxlength="25" autocapitalize="none" autocomplete="off" spellcheck="false"></span>`, "Teams search this to find the tournament and ask to join. Small letters, numbers and _ only.")}
       </div>
+      ${editing ? `<div class="card stack-s"><span class="eyebrow">Join requests</span>
+        <div class="chips"><button class="chip ${f.open !== false ? "on" : ""}" data-act="tnew-open" data-v="1">Teams can ask to join</button><button class="chip ${f.open === false ? "on" : ""}" data-act="tnew-open" data-v="0">Invite link only</button></div></div>` : ""}
       <div class="card stack-s"><span class="eyebrow">Logo and colours</span>${logoPicker(f, "tnew")}${colorPair(f, "tnew")}</div>
       <div class="card stack-s"><span class="eyebrow">Overs</span>
         <div class="chips">${chips}<button class="chip ${f.custom ? "on" : ""}" data-act="tnew-custom">Custom</button></div>
@@ -297,13 +330,25 @@
     </section>`;
   };
 
+  const cleanHandle = (h) => String(h || "").trim().replace(/^@+/, "").toLowerCase();
+
   async function saveTournament() {
     const f = form("tnew");
     const name = (f.name || "").trim();
     if (name.length < 2) { f.error = "Give the tournament a name."; return ui.render(); }
     const overs = parseInt(f.overs, 10);
     if (!(overs >= 1 && overs <= 100)) { f.error = "Overs per side must be between 1 and 100."; return ui.render(); }
+    const handle = cleanHandle(f.handle);
+    if (handle && !/^[a-z0-9_]{3,24}$/.test(handle)) { f.error = "The username needs 3 to 24 small letters, numbers or _."; return ui.render(); }
     f.busy = true; f.error = ""; ui.render();
+    // The username and join setting need migration 0010; they save on their own so the rest works without it.
+    const saveHandle = async (id) => {
+      const upd = { handle: handle || null };
+      if (f.editId) upd.open_to_requests = f.open !== false;
+      const { error } = await sb.from("tournaments").update(upd).eq("id", id);
+      if (!error) return "";
+      return error.code === "23505" ? `@${handle} is already taken. Pick another username.` : "The username needs a database update first.";
+    };
     try {
       const row = {
         name, short_name: (f.short || "").trim() || null, primary_color: f.c1, secondary_color: f.c2, overs_per_side: overs,
@@ -317,6 +362,8 @@
         const sp = { show_sponsor: !!f.showSponsor, sponsor_name: (f.sponsorName || "").trim() || null };
         if (f.sponsorBlob) sp.sponsor_logo_path = await upload("logos", f.sponsorBlob);
         const r2 = await sb.from("tournaments").update(sp).eq("id", f.editId);
+        const hErr = await saveHandle(f.editId);
+        if (hErr && handle) { f.busy = false; f.error = hErr; return ui.render(); }
         if (r2.error) ui.toast("Saved. The sponsor settings need a database update first.");
         else ui.toast("Tournament saved");
         const id = f.editId;
@@ -327,9 +374,10 @@
       row.kind = f.kind;
       const { data, error } = await sb.from("tournaments").insert(row).select().single();
       if (error) throw error;
+      const hErr = handle ? await saveHandle(data.id) : "";
       L.forms.tnew = null;
       loadMine();
-      ui.toast(`${data.name} created`);
+      ui.toast(hErr ? `${data.name} created. ${hErr}` : `${data.name} created`);
       openTour(data.id);
     } catch (e) { f.busy = false; f.error = errText(e); ui.render(); }
   }
@@ -365,7 +413,7 @@
     if (T.error || !T.t) return bar("Tournament") + `<section class="wrap stack"><p class="error">${esc(T.error || "Tournament not found.")}</p><button class="btn" data-act="t-open" data-id="${T.id}">Try again</button></section>`;
     const t = T.t, tab = view.tab || "matches";
     const hero = `<div class="hero" style="--c1:${t.primary_color || "#0F7A45"};--c2:${t.secondary_color || "#0E1A14"}">
-      ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2><p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
+      ${badge(t, "l")}<div class="hero-text"><h2>${esc(t.name)}</h2>${t.handle ? `<p class="hero-handle">@${esc(t.handle)}</p>` : ""}<p>${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} over${t.overs_per_side === 1 ? "" : "s"} a side · ${T.teams.length} team${T.teams.length === 1 ? "" : "s"}</p></div></div>`;
     const tabList = [["matches", "Matches"], ["table", "Table"], ["stats", "Stats"], ["teams", "Teams"]]
       .concat(T.roles.length && CSA.studio ? [["cards", "Cards"]] : [], isOrganiser() ? [["people", "People"]] : []);
     const tabs = `<div class="tabs">${tabList
@@ -379,9 +427,9 @@
       const groups = {};
       for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm);
       const names = Object.keys(groups).sort();
-      body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><button class="t-row" data-act="team-open" data-id="${tm.id}">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} players</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`).join("")
-        : `<p class="muted">No teams yet.${isOrganiser() ? " Add the first one." : ""}</p>`)
-        + (isOrganiser() ? `<button class="btn btn-primary" data-act="team-new">Add team</button>` : "");
+      body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><button class="t-row" data-act="team-open" data-id="${tm.id}">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} player${tm.count === 1 ? "" : "s"}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`).join("")
+        : `<p class="muted">No teams yet.${isOrganiser() ? " Add one, or share the invite link so captains add their own team." : ""}</p>`)
+        + (isOrganiser() ? joinRequests(T) + `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>` : askToJoin(T));
     } else {
       const rows = T.matches.map((m) => {
         const a = teamById(m.team1_id), b = teamById(m.team2_id);
@@ -398,6 +446,41 @@
     return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${edit}${share}</header>`
       + hero + `<section class="wrap stack">${tabs}${body}</section>`;
   };
+
+  // ---------- Teams joining: requests and invite links ----------
+
+  async function loadRequests() {
+    const T = L.tour;
+    T.requests = null;
+    const { data, error } = await sb.from("join_requests").select("id, note, created_at, teams(id, name, short_name, logo_path, primary_color, secondary_color, team_players(count))")
+      .eq("tournament_id", T.id).eq("status", "pending").order("created_at");
+    if (L.tour !== T) return;
+    T.requests = error ? [] : data.filter((r) => r.teams); // no table yet (migration 0010) shows no requests
+    rerender("tour");
+  }
+
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+  // Organisers see the teams waiting to join, with accept and decline.
+  function joinRequests(T) {
+    if (T.requests === undefined) { loadRequests(); T.requests = null; }
+    if (!T.requests || !T.requests.length) return "";
+    return `<h3 class="eyebrow">Asking to join</h3><ul class="t-list">${T.requests.map((r) => `<li class="t-row req-row">${badge(r.teams)}
+        <span class="t-text"><b>${esc(r.teams.name)}</b><small>${plural((r.teams.team_players[0] || {}).count || 0, "player")}${r.note ? ` · “${esc(r.note)}”` : ""}</small></span>
+        <span class="req-btns"><button class="btn btn-small" data-act="req-answer" data-id="${r.id}" data-ok="0">Decline</button><button class="btn btn-small btn-primary" data-act="req-answer" data-id="${r.id}" data-ok="1">Accept</button></span></li>`).join("")}</ul>`;
+  }
+
+  // Everyone else: a captain asks to put their team in.
+  function askToJoin(T) {
+    if (L.user && T.requests === undefined) { loadRequests(); T.requests = null; }
+    // The rules only return requests this user sent or whose team they run.
+    const waiting = (T.requests || []).map((r) => r.teams.name);
+    if (waiting.length) return `<p class="note">Waiting for the organiser to accept ${esc(waiting.join(", "))}.</p>`;
+    if (T.t.open_to_requests === false) return `<p class="muted small">Teams join this tournament by the organiser's invite link.</p>`;
+    return `<div class="card stack-s join-card"><b>Want your team in ${esc(T.t.short_name || T.t.name)}?</b>
+      <p class="muted small">Captains send a request, and the organiser accepts it.</p>
+      <button class="btn btn-primary" data-act="tj-request">Ask to join</button></div>`;
+  }
 
   // ---------- People: organisers, scorers and media ----------
 
@@ -520,20 +603,26 @@
 
   // ---------- New team ----------
 
+  // A team made by anyone from the Teams tab, or added to a tournament by its organiser (f.tourId).
   ui.screens.teamnew = () => {
-    const f = form("teamnew", { c1: "#0F7A45", c2: "#0E1A14" });
-    const count = (f.players || "").split("\n").filter((x) => x.trim()).length;
-    return bar("Add team", "t-open", `data-id="${L.tour.id}"`) + `<section class="wrap stack">
+    const f = form("teamnew", {}), inTour = !!f.tourId;
+    if (!f.c1) Object.assign(f, { c1: "#0F7A45", c2: "#0E1A14", withMe: !inTour });
+    const count = parsePlayers(f.players).length;
+    const back = inTour ? bar("Add team", "t-open", `data-id="${f.tourId}"`) : bar("Create team", "home");
+    const me = !inTour ? `<label class="check check-card"><input type="checkbox" data-withme="1" ${f.withMe && L.me ? "checked" : ""} ${L.me ? "" : "disabled"}>
+        <span><b>I play for this team</b><small class="muted">${L.me ? `${esc(L.me.full_name)} joins the squad as captain.` : "Set up your player profile first to add yourself."}</small></span></label>` : "";
+    return back + `<section class="wrap stack">
       <div class="card stack-s">
-        ${field("Team name", `<input id="team-name" data-f="teamnew.name" value="${esc(f.name || "")}" maxlength="60">`)}
+        ${field("Team name", `<input id="team-name" data-f="teamnew.name" value="${esc(f.name || "")}" maxlength="60" placeholder="e.g. Shapla Strikers">`)}
         ${field("Short name", `<input id="team-short" data-f="teamnew.short" value="${esc(f.short || "")}" maxlength="5" placeholder="${esc(ui.shortName(f.name || "Team"))}">`)}
-        ${field("Group (optional)", `<input id="team-group" data-f="teamnew.group" value="${esc(f.group || "")}" maxlength="10" placeholder="e.g. A">`)}
+        ${inTour ? field("Group (optional)", `<input id="team-group" data-f="teamnew.group" value="${esc(f.group || "")}" maxlength="10" placeholder="e.g. A">`) : ""}
       </div>
       <div class="card stack-s"><span class="eyebrow">Logo and colours</span>${logoPicker(f, "teamnew")}${colorPair(f, "teamnew")}</div>
-      <div class="card stack-s">${field("Players, one per line", `<textarea id="team-players" data-f="teamnew.players" rows="8" placeholder="Captain first">${esc(f.players || "")}</textarea>`, `<span data-count>${count} players</span>. The first name is the captain. You can paste rows from a spreadsheet: name, role, batting (R/L), bowling, jersey.`)}
+      ${me}
+      <div class="card stack-s">${field(inTour ? "Players, one per line" : "Other players (optional)", `<textarea id="team-players" data-f="teamnew.players" rows="7" placeholder="${inTour ? "Captain first" : "One name per line"}">${esc(f.players || "")}</textarea>`, `<span data-count>${count} players</span>. ${inTour ? "The first name is the captain. " : "You can also send players an invite link after, and they add themselves. "}Rows from a spreadsheet work too: name, role, batting (R/L), bowling, jersey.`)}
         <label class="btn btn-small file-btn">Import a CSV file<input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" data-csv="teamnew" hidden></label></div>
       ${status(f)}
-      <button class="btn btn-primary btn-big" data-act="team-save" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Add team"}</button>
+      <button class="btn btn-primary btn-big" data-act="team-save" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : inTour ? "Add team" : "Create team"}</button>
     </section>`;
   };
 
@@ -552,11 +641,12 @@
   }
 
   async function saveTeam() {
-    const f = form("teamnew");
+    const f = form("teamnew"), inTour = !!f.tourId;
     const name = (f.name || "").trim();
     const players = parsePlayers(f.players);
+    const withMe = !inTour && f.withMe && L.me;
     if (name.length < 2) { f.error = "Give the team a name."; return ui.render(); }
-    if (players.length < 2) { f.error = "Add at least 2 players, one per line."; return ui.render(); }
+    if (inTour && players.length < 2) { f.error = "Add at least 2 players, one per line."; return ui.render(); }
     f.busy = true; f.error = ""; ui.render();
     try {
       const logo_path = f.logoBlob ? await upload("logos", f.logoBlob) : null;
@@ -565,13 +655,23 @@
         primary_color: f.c1, secondary_color: f.c2,
       }).select().single();
       if (team.error) throw team.error;
-      const ids = await addPlayers(team.data.id, players);
-      await sb.from("teams").update({ captain_player_id: ids[0] }).eq("id", team.data.id);
-      const joined = await sb.from("tournament_teams").insert({ tournament_id: L.tour.id, team_id: team.data.id, group_name: (f.group || "").trim() || null });
-      if (joined.error) throw joined.error;
+      if (withMe) {
+        const r = await sb.from("team_players").insert({ team_id: team.data.id, player_id: L.me.id });
+        if (r.error) throw r.error;
+      }
+      const ids = players.length ? await addPlayers(team.data.id, players) : [];
+      const captain = withMe ? L.me.id : ids[0];
+      if (captain) await sb.from("teams").update({ captain_player_id: captain }).eq("id", team.data.id);
+      if (inTour) {
+        const joined = await sb.from("tournament_teams").insert({ tournament_id: f.tourId, team_id: team.data.id, group_name: (f.group || "").trim() || null });
+        if (joined.error) throw joined.error;
+      }
       L.forms.teamnew = null;
-      ui.toast(`${name} added`);
-      openTour(L.tour.id, "teams");
+      ui.toast(`${name} ${inTour ? "added" : "created"}`);
+      await loadMyTeams();
+      if (inTour) return openTour(f.tourId, "teams");
+      if (CSA.hub && CSA.hub.afterTeamCreated(team.data.id)) return;
+      CSA.squad.openTeam(team.data.id, "tab");
     } catch (e) { f.busy = false; f.error = errText(e); ui.render(); }
   }
 
@@ -819,6 +919,12 @@
 
   // Opens a shared link once the sign-in state is known (so scorers get the pad, fans the score).
   async function openLink() {
+    const at = /^#\/@([a-z0-9_]{3,24})$/i.exec(location.hash);
+    if (at) {
+      history.replaceState(null, "", location.pathname + location.search);
+      const { data } = await sb.from("tournaments").select("id").eq("handle", at[1].toLowerCase()).maybeSingle();
+      return data ? openTour(data.id) : ui.toast(`No tournament called @${at[1]}`);
+    }
     const hit = /^#\/(t|m)\/([0-9a-f-]{36})$/i.exec(location.hash);
     if (!hit) return;
     history.replaceState(null, "", location.pathname + location.search);
@@ -883,6 +989,7 @@
       const t = L.tour.t, preset = ui.PRESETS.some(([, n]) => n === t.overs_per_side);
       L.forms.tnew = { editId: t.id, kind: t.kind, name: t.name, short: t.short_name || "", c1: t.primary_color || "#0F7A45", c2: t.secondary_color || "#0E1A14", colorsEdited: true,
         logoUrl: t.logo_path ? publicUrl("logos", t.logo_path) : "", overs: t.overs_per_side, custom: !preset, maxBowler: t.max_overs_per_bowler || Math.ceil(t.overs_per_side / 5),
+        handle: t.handle || "", open: t.open_to_requests !== false,
         showSponsor: t.show_sponsor !== false, sponsorName: t.sponsor_name || "", sponsorUrl: t.sponsor_logo_path ? publicUrl("logos", t.sponsor_logo_path) : "" };
       ui.go("tnew");
     },
@@ -907,7 +1014,21 @@
     },
     "stat-kind"(d) { L.tour.statKind = d.k; ui.render(); },
     "tnew-sponsor"(d) { form("tnew").showSponsor = d.v === "1"; ui.render(); },
+    "tnew-open"(d) { form("tnew").open = d.v === "1"; ui.render(); },
     "t-open"(d) { openTour(d.id); },
+    async "req-answer"(d) {
+      const { error } = await sb.rpc("answer_join_request", { req: d.id, accept: d.ok === "1" });
+      if (error) return ui.toast(errText(error));
+      ui.toast(d.ok === "1" ? "Team added to the tournament" : "Request declined");
+      L.tour.requests = undefined;
+      openTour(L.tour.id, "teams");
+    },
+    async "t-invite"() {
+      const { data, error } = await sb.rpc("tournament_invite_code", { t: L.tour.id, fresh: false });
+      if (error) return ui.toast(/function|schema/.test(error.message) ? "Invite links need a database update first." : errText(error));
+      const t = L.tour.t, url = `${location.origin}${location.pathname}#/tjoin/${data}`;
+      shareLink(`Join ${t.name}`, `Add your team to ${t.name}:`, url, "Invite link copied. Send it to the captains.");
+    },
     "show-log"() { const rec = ui.current(); if (rec) loadLog(rec); },
     "person-role"(d) { form("people").role = d.r; ui.render(); },
     "person-add": addPerson,
@@ -918,7 +1039,7 @@
       loadPeople();
     },
     "tour-tab"(d) { L.tour.tab = d.t; ui.go("tour", { id: L.tour.id, tab: d.t }); },
-    "team-new"() { L.forms.teamnew = null; ui.go("teamnew"); },
+    "team-new"() { L.forms.teamnew = { tourId: L.tour.id }; ui.go("teamnew"); },
     "team-save": saveTeam,
     "match-new"() { L.forms.matchnew = null; ui.go("matchnew"); },
     "match-save": saveMatch,
@@ -972,6 +1093,7 @@
         ui.render();
       });
     }
+    if (t.dataset.withme) form("teamnew").withMe = t.checked;
     if (t.dataset.pick && L.forms.mstart) {
       const [i, j] = t.dataset.pick.split("-").map(Number);
       L.forms.mstart.picked[i][j] = t.checked;
@@ -984,7 +1106,8 @@
 
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, errText, shrink, upload, logoPicker, colorPair,
-    openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON };
+    openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
+    feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();

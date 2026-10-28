@@ -17,6 +17,7 @@
   ];
   const PRESETS = [["T10", 10], ["T20", 20], ["50 overs", 50]];
 
+  const APP = (CSA.config && CSA.config.appName) || "Cricket Scorer";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const shortName = (name) => {
     const w = name.trim().split(/\s+/);
@@ -71,8 +72,10 @@
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; if (view.screen === "home") render(); });
   window.addEventListener("appinstalled", () => { installPrompt = null; render(); });
 
-  function homeView() {
+  // Matches scored on this phone (quick matches, and tournament matches this phone scored).
+  function localMatches() {
     const list = S.list();
+    if (!list.length) return "";
     const rows = list.map((r) => {
       const s = E.replay(r.match, r.events), t = r.match.teams, ru = E.settings(r.match);
       const line = s.innings.filter((i) => i.batters.length).map((i) => `${esc(t[i.batting].short)} ${i.runs}/${i.wickets} (${E.oversText(i.legalBalls, ru.ballsPerOver)})`).join(" · ") || "Not started";
@@ -85,13 +88,21 @@
         <button class="icon-btn" data-act="delete" data-id="${r.match.id}" aria-label="Delete match">✕</button>
       </li>`;
     }).join("");
-    return `<header class="bar"><h1 class="brand">Cricket Scorer</h1></header>
+    return `<div class="stack-s"><h2 class="eyebrow">Matches on this phone</h2><ul class="match-list">${rows}</ul></div>`;
+  }
+
+  function installBanner() {
+    return installPrompt ? `<button class="install" data-act="install"><img src="icons/icon-192.png" alt=""><span><b>Install ${esc(APP)}</b><small>Opens full screen from your home screen and scores offline.</small></span></button>` : "";
+  }
+
+  // Without the online part (league.js) home is just quick matches on this phone.
+  function homeView() {
+    if (CSA.ui.screens.home) return CSA.ui.screens.home(view);
+    return `<header class="bar"><h1 class="brand">${esc(APP)}</h1></header>
       <section class="wrap stack">
-        ${installPrompt ? `<button class="install" data-act="install"><img src="icons/icon-192.png" alt=""><span><b>Install Cricket Scorer</b><small>Opens full screen from your home screen and scores offline.</small></span></button>` : ""}
-        ${CSA.ui.homeTop()}
-        <button class="btn ${CSA.ui.homeTop() ? "" : "btn-primary btn-big"}" data-act="new">Quick match (no tournament)</button>
-        ${list.length ? `<h2 class="eyebrow">Matches on this phone</h2><ul class="match-list">${rows}</ul>`
-          : `<p class="empty">No matches yet. Start one, and every ball is saved on this phone as you score, even without signal.</p>`}
+        ${installBanner()}
+        <button class="btn btn-primary" data-act="new">Score a match</button>
+        ${localMatches() || `<p class="empty">No matches yet. Start one, and every ball is saved on this phone as you score, even without signal.</p>`}
       </section>`;
   }
 
@@ -384,17 +395,20 @@
   // ---------- Render and input ----------
 
   function render() {
-    if (view.screen === "home") $app.innerHTML = homeView();
+    const tabs = CSA.ui.tabbar(view);
+    document.body.classList.toggle("has-tabs", !!tabs);
+    if (view.screen === "home") $app.innerHTML = homeView() + tabs;
     else if (view.screen === "setup") $app.innerHTML = setupView();
     else if (view.screen === "score") $app.innerHTML = scoreView();
     else if (view.screen === "card") $app.innerHTML = cardView();
-    else if (CSA.ui.screens[view.screen]) $app.innerHTML = CSA.ui.screens[view.screen](view);
+    else if (CSA.ui.screens[view.screen]) $app.innerHTML = CSA.ui.screens[view.screen](view) + tabs;
     if (sheet) renderSheet();
   }
 
   const actions = {
     async install() { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; render(); },
-    home() { rec = null; closeSheet(); view = { screen: "home", tab: 0 }; render(); },
+    // Back from a page goes to the tab it was opened from.
+    home() { rec = null; closeSheet(); view = { screen: CSA.ui.lastTab || "home", tab: 0 }; render(); },
     "match-back"() { actions.home(); },
     new() { setup = newSetup(); view = { screen: "setup" }; render(); },
     open(d) { rec = S.get(d.id); if (!rec) return; view = { screen: "score", tab: 0 }; render(); },
@@ -489,9 +503,10 @@
 
   // Shared with league.js, which adds accounts, tournaments and syncing on top of these screens.
   CSA.ui = {
-    esc, toast, shortName, PRESETS, actions, render,
+    esc, toast, shortName, PRESETS, actions, render, APP, localMatches, installBanner,
     screens: {},
-    homeTop: () => "",
+    tabbar: () => "",
+    lastTab: "home",
     matchBadge: () => "",
     cardExtra: () => "",
     changed: () => {},

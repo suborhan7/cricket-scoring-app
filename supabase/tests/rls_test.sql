@@ -189,5 +189,152 @@ do $$ begin
 exception when insufficient_privilege then null;
 end $$;
 
+-- Teams and joining (0010): own player profiles, captains, join requests and invite links.
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000e', 'captain@example.com'), ('00000000-0000-0000-0000-00000000000f', 'player@example.com');
+select pg_temp.act('00000000-0000-0000-0000-00000000000e');
+insert into public.players (id, full_name, claimed_by) values ('30000000-0000-0000-0000-00000000000e', 'Esha Captain', '00000000-0000-0000-0000-00000000000e');
+select pg_temp.blocked($q$insert into public.players (full_name, claimed_by) values ('Fake', '00000000-0000-0000-0000-00000000000f')$q$);
+insert into public.teams (id, name, short_name, captain_player_id) values ('20000000-0000-0000-0000-00000000000e', 'Esha XI', 'EXI', '30000000-0000-0000-0000-00000000000e');
+insert into public.team_players (team_id, player_id) values ('20000000-0000-0000-0000-00000000000e', '30000000-0000-0000-0000-00000000000e');
+select pg_temp.blocked($q$update public.tournaments set handle = 'stolen' where id = '10000000-0000-0000-0000-000000000001'$q$);
+
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+update public.tournaments set handle = 'wintercup' where id = '10000000-0000-0000-0000-000000000001';
+do $$ begin
+  update public.tournaments set handle = 'Bad Handle!' where id = '10000000-0000-0000-0000-000000000001';
+  raise exception 'bad handle accepted';
+exception when check_violation then null;
+end $$;
+insert into public.tournaments (id, name, overs_per_side, open_to_requests) values ('10000000-0000-0000-0000-000000000002', 'Closed Cup', 10, false);
+
+-- The captain asks to join; asking twice keeps one request; strangers can't ask for their team.
+select pg_temp.act('00000000-0000-0000-0000-00000000000e');
+do $$ begin
+  if public.request_to_join('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000e', 'We play Fridays') <> 'sent' then raise exception 'request not sent'; end if;
+  if public.request_to_join('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000e') <> 'pending' then raise exception 'second request should wait'; end if;
+  if (select count(*) from public.join_requests) <> 1 then raise exception 'captain should see their request'; end if;
+end $$;
+do $$ begin
+  perform public.request_to_join('10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-00000000000e');
+  raise exception 'closed tournament took a request';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if (select count(*) from public.join_requests) <> 0 then raise exception 'stranger sees join requests'; end if;
+  begin
+    perform public.request_to_join('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000e');
+    raise exception 'stranger asked for someone else''s team';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.answer_join_request((select id from public.join_requests limit 1), true);
+  exception when insufficient_privilege or no_data_found then null;
+  end;
+end $$;
+
+-- The organiser sees the request and an alert, and accepts it.
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+do $$
+declare r uuid;
+begin
+  select id into r from public.join_requests where team_id = '20000000-0000-0000-0000-00000000000e';
+  if r is null then raise exception 'organiser cannot see the request'; end if;
+  if not exists (select 1 from public.notifications where kind = 'join_request') then raise exception 'organiser got no alert'; end if;
+  perform public.answer_join_request(r, true);
+  if not exists (select 1 from public.tournament_teams where tournament_id = '10000000-0000-0000-0000-000000000001' and team_id = '20000000-0000-0000-0000-00000000000e') then raise exception 'accepted team not added'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000e');
+do $$ begin
+  if not exists (select 1 from public.notifications where kind = 'join_answer') then raise exception 'captain got no answer'; end if;
+end $$;
+
+-- Tournament invite link: only organisers get it; any team's own manager can use it.
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  perform public.tournament_invite_code('10000000-0000-0000-0000-000000000001');
+  raise exception 'stranger got the invite code';
+exception when insufficient_privilege then null;
+end $$;
+insert into public.teams (id, name, short_name) values ('20000000-0000-0000-0000-00000000000c', 'Stranger Things', 'ST');
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+create temp table tinv as select public.tournament_invite_code('10000000-0000-0000-0000-000000000001') as code;
+grant select on tinv to authenticated;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if public.tournament_for_invite((select code from tinv)) <> '10000000-0000-0000-0000-000000000001' then raise exception 'invite lookup failed'; end if;
+  if public.join_with_invite((select code from tinv), '20000000-0000-0000-0000-00000000000c') <> '10000000-0000-0000-0000-000000000001' then raise exception 'invite join failed'; end if;
+  if not exists (select 1 from public.tournament_teams where team_id = '20000000-0000-0000-0000-00000000000c') then raise exception 'invited team not added'; end if;
+  begin
+    perform public.join_with_invite((select code from tinv), '20000000-0000-0000-0000-000000000001');
+    raise exception 'entered a team that is not theirs';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+do $$ begin
+  if public.tournament_invite_code('10000000-0000-0000-0000-000000000001', true) = (select code from tinv) then raise exception 'fresh code was not new'; end if;
+end $$;
+
+-- Team invite link: a player needs their own profile, then joins the squad.
+select pg_temp.act('00000000-0000-0000-0000-00000000000e');
+create temp table minv as select public.team_invite_code('20000000-0000-0000-0000-00000000000e') as code;
+grant select on minv to authenticated;
+select pg_temp.act('00000000-0000-0000-0000-00000000000f');
+do $$ begin
+  perform public.team_invite_code('20000000-0000-0000-0000-00000000000e');
+  raise exception 'player got the team invite code';
+exception when insufficient_privilege then null;
+end $$;
+do $$ begin
+  perform public.join_team((select code from minv));
+  raise exception 'joined without a player profile';
+exception when no_data_found then null;
+end $$;
+insert into public.players (id, full_name, claimed_by) values ('30000000-0000-0000-0000-00000000000f', 'Farhan Player', '00000000-0000-0000-0000-00000000000f');
+do $$ begin
+  perform public.join_team((select code from minv));
+  perform public.join_team((select code from minv));
+  if (select count(*) from public.team_players where team_id = '20000000-0000-0000-0000-00000000000e') <> 2 then raise exception 'player did not join the squad once'; end if;
+end $$;
+select pg_temp.blocked($q$update public.teams set name = 'Not mine' where id = '20000000-0000-0000-0000-00000000000e'$q$);
+
+-- The creator makes the new player captain; now that player manages the team, but nobody
+-- can move a profile to another account.
+select pg_temp.act('00000000-0000-0000-0000-00000000000e');
+update public.teams set captain_player_id = '30000000-0000-0000-0000-00000000000f' where id = '20000000-0000-0000-0000-00000000000e';
+select pg_temp.blocked($q$update public.players set claimed_by = '00000000-0000-0000-0000-00000000000e' where id = '30000000-0000-0000-0000-00000000000f'$q$);
+select pg_temp.act('00000000-0000-0000-0000-00000000000f');
+update public.teams set name = 'Farhan XI' where id = '20000000-0000-0000-0000-00000000000e';
+do $$ begin
+  if (select name from public.teams where id = '20000000-0000-0000-0000-00000000000e') <> 'Farhan XI' then raise exception 'captain cannot edit the team'; end if;
+end $$;
+select pg_temp.act(null);
+do $$ begin
+  perform public.can_manage_team('20000000-0000-0000-0000-00000000000e');
+  raise exception 'anon can call can_manage_team';
+exception when insufficient_privilege then null;
+end $$;
+
+-- Someone who set up their own profile can still claim the player their captain added:
+-- the unused self-made profile is folded into the invited one.
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000011', 'gopal@example.com');
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+insert into public.players (id, full_name, claimed_by, jersey_no) values ('30000000-0000-0000-0000-000000000011', 'Gopal', '00000000-0000-0000-0000-000000000011', 11);
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+insert into public.players (id, full_name) values ('30000000-0000-0000-0000-000000000012', 'Gopal Das');
+insert into public.team_players values ('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000012');
+create temp table ginv as select public.player_invite_code('30000000-0000-0000-0000-000000000012') as code;
+grant select on ginv to anon, authenticated;
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+select public.claim_player((select code from ginv));
+do $$ begin
+  if exists (select 1 from public.players where id = '30000000-0000-0000-0000-000000000011') then raise exception 'unused own profile was not folded in'; end if;
+  if (select claimed_by from public.players where id = '30000000-0000-0000-0000-000000000012') <> '00000000-0000-0000-0000-000000000011' then raise exception 'claim with own profile did not link'; end if;
+  if (select jersey_no from public.players where id = '30000000-0000-0000-0000-000000000012') <> 11 then raise exception 'own details were not carried over'; end if;
+end $$;
+
 reset role;
 \echo 'All security checks passed'
