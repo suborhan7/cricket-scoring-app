@@ -291,12 +291,20 @@
 
   // The groups, each with its teams.
   function groupNames(T) { return [...new Set(T.teams.map((t) => t.group || ""))].filter(Boolean).sort(); }
-  function groupsCard(T) {
-    const ti = tournamentInfo(T.t), names = groupNames(T);
+  // Up to four groups on a card; more go on to further cards. One group can also have a card of its own, with captains.
+  const GROUP_PAGE = 4;
+  function groupPages(T) { const names = groupNames(T), out = []; for (let i = 0; i < names.length; i += GROUP_PAGE) out.push(names.slice(i, i + GROUP_PAGE)); return out; }
+  async function groupsCard(T, page, only) {
+    const ti = tournamentInfo(T.t), all = groupNames(T), pages = groupPages(T), names = only ? [only] : pages[page] || [];
     const groups = names.map((g) => ({ name: `Group ${g}`, teams: T.teams.filter((t) => t.group === g).map((t) => lg.teamById(t.id)) }));
-    const d = base({ ti }, { groups: { kicker: "Group stage", sub: `${T.teams.length} teams · ${names.length} groups`, groups: groups.map((g) => ({ name: g.name, teams: g.teams.map(teamInfo) })) } });
+    const part = !only && pages.length > 1 ? `Part ${page + 1} of ${pages.length}` : "";
+    const d = base({ ti }, { groups: { kicker: "Group stage", sub: `${T.teams.length} teams · ${all.length} groups`, part, groups: groups.map((g) => ({ name: g.name, teams: g.teams.map(teamInfo) })) } });
     d.urls.teams = [].concat(...groups.map((g) => g.teams.map(logoOf)));
-    return { kind: "groups", data: d, title: "Groups" };
+    if (only) {
+      const ids = groups[0].teams.map((t) => t.id), caps = await captainPhotos(ids).catch(() => new Map());
+      d.urls.caps = ids.map((id) => caps.get(id) || "");
+    }
+    return { kind: "groups", data: d, title: only ? `Group ${only}` : `Groups${part ? ` (${page + 1}/${pages.length})` : ""}` };
   }
 
   // Playing XIs of a match that has started: captain and keeper marked, toss on top.
@@ -504,7 +512,8 @@
     const days = matchDays(T).map((p, i) => Object.assign(p, { i }));
     const schedule = days.filter((p) => !p.done).concat(days.filter((p) => p.done).reverse()).map((p) => row("card-schedule", `data-i="${p.i}"`, "▦",
       `${p.done ? "Results" : "Match day"}, ${dayText(p.when)}${p.of > 1 ? ` (${p.n + 1}/${p.of})` : ""}`, `${p.page.length} match${p.page.length === 1 ? "" : "es"}`)).join("")
-      + (groupNames(T).length > 1 ? row("card-groups", "", "▥", "Groups", `${groupNames(T).length} groups, ${T.teams.length} teams`) : "");
+      + (groupNames(T).length > 1 ? groupPages(T).map((names, i, all) => row("card-groups", `data-p="${i}"`, "▥", `Groups${all.length > 1 ? ` (${i + 1}/${all.length})` : ""}`, `Groups ${names[0]}${names.length > 1 ? `–${names[names.length - 1]}` : ""}, ${T.teams.length} teams`)).join("")
+        + groupNames(T).map((g) => row("card-groups", `data-g="${esc(g)}"`, "▥", `Group ${g}`, `${T.teams.filter((t) => t.group === g).length} teams, with captains`)).join("") : "");
     const vs = upcoming.map((m) => row("card-vs", `data-id="${m.id}"`, "VS", vsName(m), whenText(m.starts_at))).join("")
       + upcoming.filter((m) => m.lineups).map((m) => row("card-lineup", `data-id="${m.id}"`, "XI", `Playing XIs, ${vsName(m)}`, "Line-ups and toss")).join("");
     const tables = T.teams.length >= 2 ? groups.map((g) => row("card-table", `data-g="${esc(g)}"`, "▤", g ? `Points table, group ${g}` : "Points table", "Current standings")).join("") : "";
@@ -657,7 +666,7 @@
     "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) show(versusCard(L.tour, m), "tour"); },
     "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
     "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) scheduleCard(L.tour, p).then((c) => show(c, "tour")); },
-    "card-groups"() { show(groupsCard(L.tour), "tour"); },
+    "card-groups"(d) { groupsCard(L.tour, +d.p || 0, d.g || "").then((c) => show(c, "tour")); },
     async "card-award"(d) { ui.toast("Making the card…"); const card = await awardCard(L.tour, d.k); if (card) show(card, "tour"); },
     async "card-lineup"(d) { const rec = await loadMatch(L.tour.matches.find((x) => x.id === d.id)); if (rec) show(await lineupCard(rec), "tour"); },
     async "card-squad"(d) { ui.toast("Loading squad…"); const card = await squadCard(L.tour, d.id); if (card) show(card, "tour"); },

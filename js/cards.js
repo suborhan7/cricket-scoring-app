@@ -21,10 +21,11 @@
   // Result: Face-off first, then Scoreline and Hero (the player of the match on the winners' stage).
   const RESULT_STYLES = [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]];
   const SCHEDULE_STYLES = [["T", "Timeline"], ["W", "Showdown"]];
+  const GROUP_STYLES = [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1398,17 +1399,19 @@
   }
   // Background from the tournament colours, the header, and the room left for the rows.
   function dayFrame(ctx, W, H, d, italic) {
-    const sc = d.schedule, P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), acc = P.mvp || P.accent, hy = (H - 1350) * 0.25;
+    const sc = d.schedule;
+    return posterFrame(ctx, W, H, d, sc.title === "Results" ? "RESULTS" : "MATCH SCHEDULE", [sc.sub, sc.kicker].filter(Boolean).join(" · ").toUpperCase(), italic);
+  }
+  function posterFrame(ctx, W, H, d, title, line, italic) {
+    const P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), acc = P.mvp || P.accent, hy = (H - 1350) * 0.25;
     const BG = mix(P.deep, "#000000", 0.4); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
     const g = ctx.createRadialGradient(W * 0.7, 200, 40, W * 0.7, 200, 1100); g.addColorStop(0, rgba(P.base, 0.75)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 26, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, 74 + hy, 12, "center");
-    const title = sc.title === "Results" ? "RESULTS" : "MATCH SCHEDULE";
     ctx.save(); ctx.translate(W / 2, 200 + hy); if (italic) ctx.transform(1, 0, -0.18, 1, 0, 0);
     fit(ctx, title, W - 100, 136, 700); ctx.textAlign = "center";
     if (italic) { ctx.fillStyle = mix(P.deep, "#000000", 0.3); ctx.fillText(title, 6, 8); const gt = ctx.createLinearGradient(0, -110, 0, 0); gt.addColorStop(0, "#FFFFFF"); gt.addColorStop(1, mix("#FFFFFF", acc, 0.35)); ctx.fillStyle = gt; }
     else ctx.fillStyle = "#FFFFFF";
     ctx.fillText(title, 0, 0); ctx.restore();
-    const line = [sc.sub, sc.kicker].filter(Boolean).join(" · ").toUpperCase();
     const spons = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false);
     if (spons) sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)");
     return { P, acc, BG, hy, line, bottom: H - (spons ? 100 : 50) };
@@ -1494,6 +1497,125 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Groups: Bands, Draw and Showcase ----------
+
+  // The header for a groups card, and each team's image index (logos and captains run in group order).
+  function groupFrame(ctx, W, H, d, italic) {
+    const G = d.groups, gs = G.groups, one = gs.length === 1;
+    const title = one ? gs[0].name.toUpperCase() : "THE GROUPS";
+    const line = [G.kicker, one ? `${gs[0].teams.length} teams` : G.sub, G.part].filter(Boolean).join(" · ").toUpperCase();
+    const F = posterFrame(ctx, W, H, d, title, line, italic);
+    let n = 0; F.at = gs.map((g) => g.teams.map(() => n++));
+    F.lineText = () => { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, line, W - 140, 24, 600); spaced(ctx, line, W / 2 + 4, 272 + F.hy, 8, "center"); };
+    return F;
+  }
+  const letterOf = (g) => String(g.name || "").replace(/^group\s*/i, "");
+  function groupGrid(W, n, y0, y1, gap) {
+    const cols = n > 1 ? 2 : 1, rows = Math.ceil(n / cols), w = (W - 60 - gap * (cols - 1)) / cols, h = (y1 - y0 - gap * (rows - 1)) / rows;
+    return Array.from({ length: n }, (_, i) => [30 + (i % cols) * (w + gap), y0 + Math.floor(i / cols) * (h + gap), w, h]);
+  }
+  const teamPalette = (t) => paletteOf(t.c1 || "#0F7A45", t.c2 || "#111111");
+
+  function drawGroupBands(ctx, W, H, th, d) {
+    const F = groupFrame(ctx, W, H, d, false), { P, acc, hy } = F, gs = d.groups.groups, one = gs.length === 1;
+    const g0 = ctx.createLinearGradient(W / 2 - 190, 0, W / 2 + 190, 0); g0.addColorStop(0, acc); g0.addColorStop(1, P.base); ctx.fillStyle = g0; roundRect(ctx, W / 2 - 190, 228 + hy, 380, 6, 3); ctx.fill();
+    F.lineText();
+    const most = Math.max(1, ...gs.map((g) => g.teams.length)), rmax = one ? 200 : gs.length > 2 ? 130 : 175;
+    const y0 = 320 + hy * 2, y1 = gs.length > 2 ? F.bottom : Math.min(F.bottom, y0 + 10 + (one ? 0 : 116) + most * rmax);
+    groupGrid(W, gs.length, y0, y1, 30).forEach(([gx, gy, gw, gh], i) => {
+      const g = gs[i]; let top = gy + 16;
+      if (!one) {
+        const hh = Math.min(90, gh * 0.18), L = letterOf(g);
+        ctx.fillStyle = acc; font(ctx, hh * 0.95, 700); text(ctx, L, gx + 6, gy + hh * 0.85); const lw = ctx.measureText(L).width;
+        ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, Math.min(22, hh * 0.3), 600, BODY); spaced(ctx, "GROUP", gx + 18 + lw, gy + hh * 0.5, 6);
+        ctx.fillStyle = "rgba(255,255,255,0.4)"; spaced(ctx, `${g.teams.length} TEAMS`, gx + 18 + lw, gy + hh * 0.85, 4);
+        ctx.fillStyle = rgba(acc, 0.5); ctx.fillRect(gx + 6, gy + hh + 10, gw - 12, 2); top = gy + hh + 26;
+      }
+      const n = g.teams.length, rh = Math.min(rmax, (gy + gh - top) / n), bh = rh - (one ? 18 : 12), sk = bh * 0.25;
+      g.teams.forEach((t, k) => {
+        const tp = teamPalette(t), y = top + k * rh, a = gx, b = gx + gw, ix = F.at[i][k], cap = one && d.images.caps && d.images.caps[ix];
+        slant(ctx, a, y, b - a, bh, sk); const gr = ctx.createLinearGradient(a, y, b, y + bh); gr.addColorStop(0, tp.base); gr.addColorStop(1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = gr; ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(a + sk, y, b - a - sk, 3);
+        let right = b - sk - 20;
+        if (cap) { const bH = Math.min(bh * 1.25, 240), bx = b - sk / 2 - bH * 0.55; ctx.save(); ctx.beginPath(); ctx.rect(a, y - 40, b - a, bh + 40); ctx.clip(); bust(ctx, cap, bx, y + bh, bH); ctx.restore(); right = bx - bH * 0.55; }
+        const ls = bh * 0.82; logo(ctx, d.images.teams[ix], t, a + sk + 14 + ls / 2, y + bh / 2, ls);
+        const nm = (t.name || "").toUpperCase(), fs = Math.min(one ? 60 : 48, bh * 0.42);
+        ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, right - (a + sk + 34 + ls), fs, 700); text(ctx, nm, a + sk + 34 + ls, y + bh / 2 + fs * 0.36);
+      });
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  function drawGroupDraw(ctx, W, H, th, d) {
+    const F = groupFrame(ctx, W, H, d, true), { acc, BG, hy } = F, gs = d.groups.groups, one = gs.length === 1;
+    F.lineText();
+    groupGrid(W, gs.length, 310 + hy * 2, F.bottom, 24).forEach(([gx, gy, gw, gh], i) => {
+      const g = gs[i], L = letterOf(g);
+      ctx.save(); roundRect(ctx, gx, gy, gw, gh, 26); ctx.fillStyle = rgba(mix(BG, "#000000", 0.35), 0.85); ctx.fill(); ctx.clip();
+      ctx.fillStyle = rgba(acc, 0.1); font(ctx, Math.min(gh, gw * 1.4) * 0.95, 700); text(ctx, L, gx + gw - 10, gy + gh * 0.88, "right"); ctx.restore();
+      roundRect(ctx, gx, gy, gw, gh, 26); ctx.strokeStyle = rgba(acc, 0.45); ctx.lineWidth = 2; ctx.stroke();
+      let top = gy + 24;
+      if (!one) {
+        const hh = Math.min(64, gh * 0.14); ctx.fillStyle = acc; slant(ctx, gx + 24, gy + 24, Math.min(260, gw * 0.6), hh, hh * 0.25); ctx.fill();
+        ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; font(ctx, hh * 0.55, 700); spaced(ctx, `GROUP ${L}`, gx + 44, gy + 24 + hh * 0.7, 4); top = gy + 24 + hh + 20;
+      }
+      const n = g.teams.length, cols = n <= 6 ? 2 : 3, rows = Math.ceil(n / cols), pad = 24, gap = 14, tw = (gw - pad * 2 - gap * (cols - 1)) / cols, tht = Math.min(tw * (one ? 1.15 : 0.95), (gy + gh - pad - top - gap * (rows - 1)) / rows);
+      g.teams.forEach((t, k) => {
+        const tp = teamPalette(t), x0 = gx + pad + (k % cols) * (tw + gap), y = top + Math.floor(k / cols) * (tht + gap), ix = F.at[i][k], cap = one && d.images.caps && d.images.caps[ix];
+        ctx.save(); roundRect(ctx, x0, y, tw, tht, 18); const gr = ctx.createLinearGradient(x0, y, x0, y + tht); gr.addColorStop(0, tp.base); gr.addColorStop(1, mix(tp.deep, "#000000", 0.25)); ctx.fillStyle = gr; ctx.shadowColor = rgba(tp.base, 0.45); ctx.shadowBlur = 18; ctx.fill(); ctx.restore();
+        const fs = Math.min(one ? 40 : 30, tht * 0.14), nm = (t.name || "").toUpperCase();
+        if (cap) {
+          ctx.save(); roundRect(ctx, x0, y, tw, tht, 18); ctx.clip(); bust(ctx, cap, x0 + tw / 2, y + tht, tht * 0.82);
+          const sh = ctx.createLinearGradient(0, y + tht * 0.6, 0, y + tht); sh.addColorStop(0, "rgba(0,0,0,0)"); sh.addColorStop(1, rgba(mix(tp.deep, "#000000", 0.5), 0.95)); ctx.fillStyle = sh; ctx.fillRect(x0, y + tht * 0.55, tw, tht * 0.45); ctx.restore();
+          const ls = Math.min(tht * 0.26, 110); logo(ctx, d.images.teams[ix], t, x0 + 16 + ls / 2, y + 16 + ls / 2, ls);
+        } else logo(ctx, d.images.teams[ix], t, x0 + tw / 2, y + tht * 0.42, Math.min(tht * 0.62, tw * 0.6));
+        ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, tw - 24, fs, 700); text(ctx, nm, x0 + tw / 2, y + tht - Math.max(14, tht * 0.08), "center");
+      });
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // One group on its own: big slanted frames in two columns, each with the captain inside and the logo in the corner.
+  function showcaseOne(ctx, W, d, F, g) {
+    const m = g.teams.length, cols = 2, rows = Math.ceil(m / cols), y0 = 330 + F.hy * 2, gap = 26, ns = 34;
+    const cw = (W - 80 - gap) / cols, ch = Math.min((F.bottom - y0 - gap * (rows - 1)) / rows, cw * 0.95 + ns * 1.6), fh = ch - ns * 1.6, sk = fh * 0.12;
+    const top = y0 + Math.max(0, (F.bottom - y0 - (ch * rows + gap * (rows - 1))) * 0.4);
+    g.teams.forEach((t, k) => {
+      const tp = teamPalette(t), last = k === m - 1 && m % 2, x = last ? W / 2 - cw / 2 : 40 + (k % cols) * (cw + gap), y = top + Math.floor(k / cols) * (ch + gap), ix = F.at[0][k], cap = d.images.caps && d.images.caps[ix];
+      ctx.save(); slant(ctx, x, y, cw, fh, sk); const gf = ctx.createLinearGradient(0, y, 0, y + fh); gf.addColorStop(0, tp.base); gf.addColorStop(1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = gf; ctx.shadowColor = rgba(tp.base, 0.55); ctx.shadowBlur = 24; ctx.fill(); ctx.restore();
+      ctx.save(); slant(ctx, x, y, cw, fh, sk); ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.07)"; fit(ctx, t.short || "", cw - 40, fh * 0.7, 700); text(ctx, t.short || "", x + cw - 20, y + fh * 0.62, "right");
+      if (cap) bust(ctx, cap, x + cw * 0.6, y + fh, fh * 0.92);
+      ctx.restore();
+      slant(ctx, x, y, cw, fh, sk); ctx.strokeStyle = tp.accent || "#FFFFFF"; ctx.lineWidth = 3; ctx.stroke();
+      const ls = cap ? Math.min(fh * 0.34, 120) : fh * 0.6; logo(ctx, d.images.teams[ix], t, cap ? x + sk + 14 + ls / 2 : x + cw / 2, cap ? y + fh - 14 - ls / 2 : y + fh / 2, ls);
+      const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, cw - 20, ns, 700); text(ctx, nm, x + cw / 2 - sk / 2, y + fh + ns * 1.3, "center");
+    });
+  }
+  function drawGroupShowcase(ctx, W, H, th, d) {
+    const F = groupFrame(ctx, W, H, d, true), { P, acc, BG, hy } = F, gs = d.groups.groups;
+    F.lineText();
+    const n = gs.length;
+    if (n === 1) { showcaseOne(ctx, W, d, F, gs[0]); appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05); return; }
+    const rows = dayRows(n, 320 + hy * 2, F.bottom, 330, n > 2 ? 22 : 40);
+    gs.forEach((g, i) => {
+      const [y, h] = rows[i], L = letterOf(g), bw = Math.min(150, h * 0.62), sk = h * 0.12;
+      ctx.fillStyle = rgba(mix(BG, "#000000", 0.4), 0.7); slant(ctx, 20, y, W - 40, h, sk); ctx.fill();
+      const gl = ctx.createLinearGradient(30, y, 30 + bw, y + h); gl.addColorStop(0, acc); gl.addColorStop(1, mix(acc, P.base, 0.6)); ctx.fillStyle = gl; slant(ctx, 20, y, bw + sk, h, sk); ctx.fill();
+      ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; font(ctx, Math.min(20, h * 0.1), 700, BODY); spaced(ctx, "GROUP", 20 + (bw + sk) / 2, y + h * 0.3, 5, "center");
+      fit(ctx, L, bw - 10, h * 0.55, 700); text(ctx, L, 20 + (bw + sk) / 2, y + h * 0.82, "center");
+      const m = g.teams.length, x0 = 20 + bw + sk + 24, x1 = W - 40 - sk / 2, cw = (x1 - x0) / Math.max(1, m), fw = Math.min(cw - 18, h * 0.62), fk = fw * 0.14, ns = Math.min(30, h * 0.09);
+      g.teams.forEach((t, k) => {
+        const tp = teamPalette(t), cx = x0 + cw * (k + 0.5), fy = y + (h - fw - ns * 1.4) / 2 - 4;
+        ctx.save(); slant(ctx, cx - fw / 2, fy, fw, fw, fk); const gf = ctx.createLinearGradient(0, fy, 0, fy + fw); gf.addColorStop(0, tp.base); gf.addColorStop(1, tp.deep); ctx.fillStyle = gf; ctx.shadowColor = rgba(tp.base, 0.55); ctx.shadowBlur = 20; ctx.fill(); ctx.restore();
+        slant(ctx, cx - fw / 2, fy, fw, fw, fk); ctx.strokeStyle = tp.accent || "#FFFFFF"; ctx.lineWidth = 3; ctx.stroke();
+        logo(ctx, d.images.teams[F.at[i][k]], t, cx, fy + fw / 2, fw * 0.66);
+        const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, cw - 10, ns, 700); text(ctx, nm, cx, fy + fw + ns * 1.35, "center");
+      });
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1510,6 +1632,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "groups") { ({ B: drawGroupBands, D: drawGroupDraw, S: drawGroupShowcase })[style](ctx, W, H, th, d); return cv; }
     if (kind === "schedule") { (style === "W" ? drawShowdown : drawTimeline)(ctx, W, H, th, d); return cv; }
     if (kind === "potm" || kind === "allround") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
     const K = KITS[style](th, W, H, d).use(ctx);
