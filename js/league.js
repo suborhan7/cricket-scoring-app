@@ -304,7 +304,7 @@
     const editing = !!f.editId;
     const sponsor = editing ? `<div class="card stack-s"><span class="eyebrow">Sponsor on cards</span>
         <div class="chips"><button class="chip ${f.showSponsor ? "on" : ""}" data-act="tnew-sponsor" data-v="1">Show sponsor</button><button class="chip ${f.showSponsor ? "" : "on"}" data-act="tnew-sponsor" data-v="0">Hide</button></div>
-        ${f.showSponsor ? `${field("Sponsor name", `<input data-f="tnew.sponsorName" value="${esc(f.sponsorName || "")}" maxlength="40" placeholder="Leave empty to show a sample">`)}
+        ${f.showSponsor ? `${field("Sponsor name", `<input data-f="tnew.sponsorName" value="${esc(f.sponsorName || "")}" maxlength="40" placeholder="Optional">`)}
         <div class="logo-pick">${f.sponsorUrl ? `<img class="logo logo-l" src="${f.sponsorUrl}" alt="Sponsor logo preview">` : `<span class="logo logo-l logo-empty">Logo</span>`}
           <label class="btn btn-small file-btn">${f.sponsorUrl ? "Change sponsor logo" : "Upload sponsor logo"}<input type="file" accept="image/*" data-sponsor="1" hidden></label></div>` : ""}
       </div>` : "";

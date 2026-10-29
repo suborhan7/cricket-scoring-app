@@ -210,23 +210,28 @@
   }
 
   // Sponsor slot and the app mark along the bottom.
+  // Sponsors along the foot: "Presented by" and one logo (with its name), or "Sponsors" and a row of
+  // logos. With no sponsor the section is left out and only the app mark shows.
   function sponsor(ctx, W, y, d, light, mark) {
     const ink = light ? "#0A1024" : "#FFFFFF";
-    if (d.sponsor && d.sponsor.show !== false) {
-      ctx.fillStyle = light ? "rgba(10,16,36,0.6)" : "rgba(255,255,255,0.6)"; font(ctx, 18, 700, BODY); spaced(ctx, "PRESENTED BY", 60, y, 3);
-      if (d.images.sponsor) {
-        const img = d.images.sponsor, k = Math.min(200 / img.width, 48 / img.height);
-        ctx.drawImage(img, 60, y + 12, img.width * k, img.height * k);
-        if (d.sponsor.name) { ctx.fillStyle = ink; font(ctx, 28, 700); text(ctx, d.sponsor.name.toUpperCase(), 60 + img.width * k + 14, y + 46); }
-      } else {
-        // Sample sponsor mark until the organiser adds a real one.
-        ctx.strokeStyle = ink; ctx.lineWidth = 3; roundRect(ctx, 60, y + 12, 40, 40, 9); ctx.stroke();
-        ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(80, y + 32, 8, 0, Math.PI * 2); ctx.fill();
-        font(ctx, 28, 700); text(ctx, (d.sponsor.name || "YOUR BRAND").toUpperCase(), 114, y + 44);
+    const list = d.sponsor && d.sponsor.show === false ? [] : (d.sponsors || []).map((s, i) => ({ name: s.name || "", img: d.images.sponsors[i] })).filter((s) => s.img || s.name);
+    if (list.length) {
+      ctx.fillStyle = light ? "rgba(10,16,36,0.6)" : "rgba(255,255,255,0.6)"; font(ctx, 18, 700, BODY); spaced(ctx, list.length > 1 ? "SPONSORS" : "PRESENTED BY", 60, y, 3);
+      const maxX = W - 260, gap = 26, lw = list.length > 1 ? Math.min(160, (maxX - 60 - gap * (list.length - 1)) / list.length) : 200;
+      let x = 60;
+      for (const sp of list) {
+        if (sp.img) {
+          const k = Math.min(lw / sp.img.width, 48 / sp.img.height);
+          ctx.drawImage(sp.img, x, y + 12 + (48 - sp.img.height * k) / 2, sp.img.width * k, sp.img.height * k);
+          x += sp.img.width * k + 14;
+        }
+        if (sp.name && (list.length === 1 || !sp.img)) { ctx.fillStyle = ink; fit(ctx, sp.name.toUpperCase(), Math.max(80, maxX - x), 28, 700, DISPLAY, 14); text(ctx, sp.name.toUpperCase(), x, y + 46); x += ctx.measureText(sp.name.toUpperCase()).width + 14; }
+        x += gap - 14;
       }
     }
     ctx.fillStyle = mark; font(ctx, 20, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 60, y + 44, 3, "right");
   }
+
 
   // ---------- The three looks ----------
   // Each kit draws the background, header, footer, titles, rows, tags, panels and stat tiles;
@@ -923,8 +928,10 @@
       await Promise.all(["700 100px Oswald", "600 100px Oswald", "500 100px Oswald", '500 30px "DM Sans"', '600 30px "DM Sans"', '700 30px "DM Sans"'].map((f) => document.fonts.load(f))).catch(() => {});
     }
     const u = d.urls || {};
-    const [tournament, sponsorImg, playerImg, ...teams] = await Promise.all([loadImg(u.tournament), loadImg(u.sponsor), loadImg(u.player), ...(u.teams || []).map(loadImg)]);
-    d.images = { tournament, sponsor: sponsorImg, player: playerImg, teams };
+    // Sponsors: d.sponsors [{name, url}], or the older single d.sponsor with urls.sponsor.
+    if (!d.sponsors) d.sponsors = d.sponsor && (u.sponsor || d.sponsor.name) ? [{ name: d.sponsor.name || "", url: u.sponsor || "" }] : [];
+    const [tournament, playerImg, sponsors, teams] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg))]);
+    d.images = { tournament, player: playerImg, sponsors, teams };
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     const K = KITS[style](th, W, H, d).use(ctx);

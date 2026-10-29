@@ -1,5 +1,5 @@
 // Caches the app so it opens and scores with no signal at the ground.
-const CACHE = "scorer-v21";
+const CACHE = "scorer-v22";
 const FILES = ["./", "index.html", "css/app.css", "js/engine.js", "js/stats.js", "js/store.js", "js/app.js", "js/config.js", "js/league.js", "js/squad.js", "js/cards.js", "js/studio.js", "js/alerts.js", "js/hub.js", "vendor/supabase.js", "manifest.webmanifest", "icon.svg", "icons/icon-192.png", "icons/icon-512.png", "privacy.html"];
 
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())));
