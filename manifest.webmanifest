@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Cricket Scorer",
-  "short_name": "Scorer",
+  "name": "CricPulse",
+  "short_name": "CricPulse",
   "description": "Score cricket ball by ball, run tournaments with live links, points tables and stats, and share milestone cards.",
   "start_url": "./",
   "scope": "./",

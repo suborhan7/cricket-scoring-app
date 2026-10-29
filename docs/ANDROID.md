@@ -10,7 +10,7 @@ launch, and `android-assets/offline.html` shows if the very first launch has no 
 Every push to `main` runs `.github/workflows/android.yml`, which builds a debug APK and
 puts it on the **android-latest** release:
 
-https://github.com/suborhan7/cricket-scoring-app/releases/download/android-latest/cricket-scorer.apk
+https://github.com/suborhan7/cricket-scoring-app/releases/download/android-latest/cricpulse.apk
 
 To install it, open the link on an Android phone, open the downloaded file, and allow
 "Install unknown apps" when asked.

@@ -40,15 +40,18 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
       - name: Rename
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk cricket-scorer.apk
+        # cricket-scorer.apk is the old name; it stays so links already shared keep working.
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk cricpulse.apk
+          cp cricpulse.apk cricket-scorer.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: cricket-scorer-apk
-          path: cricket-scorer.apk
+          name: cricpulse-apk
+          path: cricpulse.apk
       - name: Publish to the android-latest release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view android-latest >/dev/null 2>&1 || gh release create android-latest --title "Android app (latest)" --notes "Install on Android: download cricket-scorer.apk, open it, and allow installing from this source when asked. Rebuilt on every update." --prerelease
-          gh release upload android-latest cricket-scorer.apk --clobber
+          gh release view android-latest >/dev/null 2>&1 || gh release create android-latest --title "Android app (latest)" --notes "Install on Android: download cricpulse.apk, open it, and allow installing from this source when asked. Rebuilt on every update." --prerelease
+          gh release upload android-latest cricpulse.apk cricket-scorer.apk --clobber

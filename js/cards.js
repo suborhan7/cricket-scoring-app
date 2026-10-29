@@ -122,7 +122,7 @@
         ctx.fillText((d.sponsor.name || "YOUR BRAND").toUpperCase(), 120, fy + 52);
       }
     }
-    ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 22, 600, BODY); spaced(ctx, d.appName || "CRICKET SCORER", W - 60, fy + 52, 3, "right");
+    ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 22, 600, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 60, fy + 52, 3, "right");
     ctx.textAlign = "left";
   }
 

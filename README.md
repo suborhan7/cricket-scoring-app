@@ -1,4 +1,4 @@
-# Cricket Scorer
+# CricPulse
 
 Ball-by-ball cricket scoring that works on a phone at the ground, even with no signal. This is the first piece of a bigger app for running tournaments and making match cards (fifty cards, results, points tables).
 
