@@ -425,9 +425,13 @@
     const rows = list.map((r) => { const t = lg.teamById(r.teamId); return { name: r.name, initials: initialsOf(r.name), team: teamInfo(t), logo: logoOf(t), value: K.value(r), sub: K.sub(r) }; });
     const d = base({ ti }, { leaders: { title: K.title, unit: K.unit, sub: `After ${done} match${done === 1 ? "" : "es"}`, rows } });
     d.urls.teams = rows.map((r) => r.logo);
-    if (list[0].id && sb) {
-      const { data } = await sb.from("players").select("photo_path").eq("id", list[0].id).maybeSingle();
-      d.urls.player = data && data.photo_path ? url("photos", data.photo_path) : "";
+    // Everyone's photo, for the faces on each row.
+    const ids = list.map((r) => r.id).filter(Boolean);
+    if (ids.length && sb) {
+      const { data } = await sb.from("players").select("id, photo_path").in("id", ids);
+      const photo = new Map((data || []).filter((x) => x.photo_path).map((x) => [x.id, url("photos", x.photo_path)]));
+      d.urls.players = list.map((r) => photo.get(r.id) || "");
+      d.urls.player = d.urls.players[0];
     }
     return { kind: "leaders", data: d, title: K.title };
   }
