@@ -172,44 +172,52 @@
 
   // ---------- Score ----------
 
-  // The score as one card: who is batting, the big score with overs beside it, then the rates.
+  // Live card in the familiar scorecard layout: team and innings, the score with overs,
+  // CRR on the right, a partnership strip, then the batters and bowler as small tables.
   function scoreboard(s) {
     const ru = rules(), inn = s.innings[s.current], t = rec.match.teams;
     const ch = E.chase(rec.match, s);
     const crr = inn.legalBalls ? ((inn.runs * ru.ballsPerOver) / inn.legalBalls).toFixed(2) : "0.00";
-    const stat = (k, v) => `<span class="sb-stat">${k} <b>${v}</b></span>`;
-    let stats = stat("CRR", crr);
-    if (ch && !s.result && ch.ballsLeft > 0) stats += `<span class="sb-stat sb-need">Need <b>${ch.need}</b> off <b>${ch.ballsLeft}</b></span>` + stat("RRR", ch.rrr.toFixed(2));
-    if (inn.freeHit && !s.result) stats += `<span class="pill pill-free">FREE HIT</span>`;
-    const tag = s.current === 1 ? `${esc(t[s.innings[0].batting].short)} ${s.innings[0].runs}/${s.innings[0].wickets}` : "1st innings";
-    return `<div class="scoreboard"><div class="sb-card">
-      <div class="sb-top"><span class="sb-badge" aria-hidden="true">${esc(t[inn.batting].short.slice(0, 3))}</span><span class="sb-team">${esc(t[inn.batting].name)}</span><span class="sb-tag">${tag}</span></div>
-      <div class="sb-main"><span class="sb-score">${inn.runs}<span class="sb-slash">/</span>${inn.wickets}</span>
-        <span class="sb-overs">${E.oversText(inn.legalBalls, ru.ballsPerOver)}<small> / ${ru.oversPerSide} ov</small></span></div>
-      <div class="sb-sub">${stats}</div>
+    const rate = (k, v) => `<div class="lv-rate"><span>${k}</span><b>${v}</b></div>`;
+    const chasing = ch && !s.result && ch.ballsLeft > 0;
+    // Partnership: runs and legal balls since the last wicket.
+    let pr = 0, pb = 0;
+    for (const over of inn.overs) for (const b of over) { pr += b.runs; if (b.legal) pb++; if (b.wicket) { pr = 0; pb = 0; } }
+    const strip = [
+      inn.batters.length ? `<span><em>P'ship</em> ${pr}(${pb})</span>` : "",
+      chasing ? `<span><em>Need</em> ${ch.need} off ${ch.ballsLeft}</span>` : s.current === 1 ? `<span><em>${esc(t[s.innings[0].batting].short)}</em> ${s.innings[0].runs}-${s.innings[0].wickets}</span>` : "",
+      inn.freeHit && !s.result ? `<span class="pill pill-free">FREE HIT</span>` : "",
+    ].filter(Boolean).join("");
+    return `<div class="scoreboard"><div class="live">
+      <div class="lv-head">
+        <div class="lv-score"><div class="lv-team">${esc(t[inn.batting].short)} <small>${s.current === 0 ? "1st" : "2nd"} inn</small></div>
+          <div class="lv-runs">${inn.runs}-${inn.wickets} <small>(${E.oversText(inn.legalBalls, ru.ballsPerOver)})</small></div></div>
+        <div class="lv-rates">${rate("CRR", crr)}${chasing ? rate("RRR", ch.rrr.toFixed(2)) : ""}</div>
+      </div>
+      ${strip ? `<div class="lv-strip">${strip}</div>` : ""}
+      ${s.next === "done" ? "" : playersBlock(s)}
     </div></div>`;
   }
 
   function playersBlock(s) {
     const ru = rules(), inn = s.innings[s.current];
     if (!inn.batters.length) return "";
-    const row = (p, strike) => {
-      if (p == null) return `<div class="prow prow-empty"><span>Waiting for batter</span></div>`;
+    const bat = (p, strike) => {
+      if (p == null) return `<tr><td class="muted">Waiting for batter</td><td></td><td></td><td></td><td></td><td></td></tr>`;
       const b = inn.batters.find((x) => x.player === p);
-      return `<div class="prow ${strike ? "on-strike" : ""}"><span class="pname">${esc(name(inn.batting, p))}${strike ? '<i class="bat-dot" aria-label="on strike"></i>' : ""}</span>
-        <span class="pfig"><b>${b.runs}</b> (${b.balls})</span><span class="pmeta">${b.fours}×4 ${b.sixes}×6 · SR ${sr(b.runs, b.balls)}</span></div>`;
+      return `<tr class="${strike ? "on-strike" : ""}"><td>${esc(name(inn.batting, p))}${strike ? "*" : ""}</td><td><b>${b.runs}</b></td><td>${b.balls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr(b.runs, b.balls)}</td></tr>`;
     };
     const bw = inn.bowler != null ? inn.bowlers.find((x) => x.player === inn.bowler) : null;
+    const bowl = bw ? `<tr><td>${esc(name(inn.bowling, bw.player))}</td><td>${E.oversText(bw.balls, ru.ballsPerOver)}</td><td>${bw.maidens}</td><td>${bw.runs}</td><td><b>${bw.wickets}</b></td><td>${econ(bw.runs, bw.balls, ru.ballsPerOver)}</td></tr>`
+      : `<tr><td class="muted">Next bowler?</td><td></td><td></td><td></td><td></td><td></td></tr>`;
     const over = inn.overs[inn.overs.length - 1] || [];
     const lastOver = over.length ? over : (inn.overs[inn.overs.length - 2] || []);
     const balls = lastOver.map((b) => `<span class="ball ${b.wicket ? "b-w" : b.extra ? "b-x" : b.runs === 4 ? "b-4" : b.runs === 6 ? "b-6" : b.runs === 0 ? "b-0" : ""}">${b.label === "0" ? "•" : esc(b.label)}</span>`).join("");
-    return `<div class="players">
-      ${row(inn.striker, true)}${row(inn.nonStriker, false)}
-      <div class="prow prow-bowl"><span class="pname">${bw ? esc(name(inn.bowling, bw.player)) : "Next bowler?"}</span>
-        ${bw ? `<span class="pfig">${E.oversText(bw.balls, ru.ballsPerOver)}-${bw.maidens}-${bw.runs}-<b>${bw.wickets}</b></span><span class="pmeta">Econ ${econ(bw.runs, bw.balls, ru.ballsPerOver)}</span>` : ""}</div>
+    return `<table class="lv-tbl"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead>
+        <tbody>${bat(inn.striker, true)}${bat(inn.nonStriker, false)}</tbody>
+        <thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>ER</th></tr></thead><tbody>${bowl}</tbody></table>
       <div class="over"><span class="over-label">${over.length ? "This over" : "Last over"}</span><div class="balls">${balls || '<span class="muted">No balls yet</span>'}</div>
-        ${s.next === "ball" && !rec.readOnly && !rec.paused ? `<button class="swap-btn" data-act="swap" aria-label="Swap strike">⇄ Swap</button>` : ""}</div>
-    </div>`;
+        ${s.next === "ball" && !rec.readOnly && !rec.paused ? `<button class="swap-btn" data-act="swap" aria-label="Swap strike">⇄ Swap</button>` : ""}</div>`;
   }
 
   function pickList(title, team, players, act, extra) {
@@ -286,7 +294,7 @@
     return `<div class="score-screen"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
         <h1 class="score-title">${esc(t[0].name)} <em>v</em> ${esc(t[1].name)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small btn-card" data-act="card">Scorecard</button></header>
       ${scoreboard(s)}
-      <section class="wrap stack-s score-body">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section></div>`;
+      <section class="wrap stack-s score-body">${action}${tools}</section></div>`;
   }
 
   // ---------- Hand over and backup links (quick matches) ----------
