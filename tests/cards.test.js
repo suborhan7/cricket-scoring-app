@@ -57,6 +57,7 @@ test("milestone cards have Spotlight and Split; other player cards Broadcast and
   assert.deepEqual(C.stylesFor("groups"), [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]]);
   assert.deepEqual(C.stylesFor("lineup"), [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]]);
   assert.deepEqual(C.stylesFor("squad"), [["R", "Roster"], ["C", "Captain"], ["N", "Numbers"]]);
+  assert.deepEqual(C.stylesFor("versus"), [["C", "Clash"], ["F", "Frames"], ["S", "Stack"]]);
   assert.deepEqual(C.stylesFor("table").map(([k]) => k), ["A", "B", "C"]);
   assert.deepEqual(C.stylesFor("milestone"), [["S", "Spotlight"], ["P", "Split"]]);
   assert.deepEqual(C.stylesFor("result"), [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]]);
