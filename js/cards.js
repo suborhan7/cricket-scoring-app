@@ -2,8 +2,8 @@
 //   A "Broadcast" (TV graphics: skewed bars, white plates), B "Poster" (editorial: giant type,
 //   hairlines, film grain) and C "Modern" (dark glass panels, colour glows, lime accent).
 // Cards: match day fixtures, groups, playing XIs, versus, result, points table, squad, leaders,
-// innings-break target, champions and runners-up, and the player cards (milestones, player of
-// the match, tournament awards), which come in A and B only. Each card is a feed post
+// innings-break target, champions and runners-up, and the player cards: tournament awards in A
+// and B, milestones in Spotlight and Split, player of the match in Halo, Spotlight and Split. Each card is a feed post
 // (1080 × 1350) or a story (1080 × 1920), with the tournament's logo and a sponsor slot.
 // Missing logos become a crest in the team's colours; a missing photo becomes a silhouette in
 // the team's kit. No DOM besides canvases, so the drawing can be reused anywhere.
@@ -16,7 +16,9 @@
   const HERO = new Set(["milestone", "potm", "award"]);
   // Milestone cards have their own two looks; other player cards have no Modern look.
   const MILESTONE_STYLES = [["S", "Spotlight"], ["P", "Split"]];
-  const stylesFor = (kind) => kind === "milestone" ? MILESTONE_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+  // Player of the match: Halo first, then the milestone looks.
+  const POTM_STYLES = [["H", "Halo"], ["S", "Spotlight"], ["P", "Split"]];
+  const stylesFor = (kind) => kind === "milestone" ? MILESTONE_STYLES : kind === "potm" ? POTM_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1046,6 +1048,155 @@
     grain(ctx, W, H, 0.05);
   }
 
+  // Halo: the player in the middle of a ring in the jersey colour, light rays behind, a ribbon,
+  // the name and one row of figures (batting, bowling or fielding, then MVP points).
+  function drawHalo(ctx, W, H, th, d) {
+    const P = jerseyPalette(d), dy = H - 1350, acc = P.mvp || P.accent, BG = mix(P.deep, "#000000", 0.3), p = d.potm;
+    const cy = 560 + dy * 0.45, r = 330 + dy * 0.12, foot = 980 + dy * 0.75;
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(W / 2, cy, 60, W / 2, cy, 760 + dy * 0.2);
+    g.addColorStop(0, rgba(P.base, 0.95)); g.addColorStop(0.6, rgba(P.deep, 0.6)); g.addColorStop(1, rgba(BG, 0));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.translate(W / 2, cy);
+    for (let i = 0; i < 36; i++) { ctx.rotate(Math.PI / 18); ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.025)" : rgba(P.glow, 0.05); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-60, -1400); ctx.lineTo(60, -1400); ctx.fill(); }
+    ctx.restore();
+    ctx.strokeStyle = rgba(acc, 0.25); ctx.lineWidth = 34; ctx.beginPath(); ctx.arc(W / 2, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = acc; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(W / 2, cy, r, 0, Math.PI * 2); ctx.stroke();
+    // A cut-out stands in the ring with its head over the top; a plain photo is framed inside it.
+    const img = d.images.player, team = { c1: d.player.c1, c2: d.player.c2 };
+    if (img && !cutout(img)) {
+      ctx.save(); ctx.beginPath(); ctx.arc(W / 2, cy, r - 4, 0, Math.PI * 2); ctx.clip();
+      const k = Math.max((2 * r) / img.width, (2 * r) / img.height);
+      ctx.drawImage(img, W / 2 - (img.width * k) / 2, cy - r - (img.height * k - 2 * r) * 0.2, img.width * k, img.height * k);
+      ctx.restore();
+    } else player(ctx, img, { cx: W / 2, bottom: foot, h: img ? 760 + dy * 0.6 : 560 + dy * 0.4, w: img ? 560 : 420 }, team, d.player.no);
+    g = ctx.createLinearGradient(0, foot - 160, 0, foot + 10); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG);
+    ctx.fillStyle = g; ctx.fillRect(0, foot - 160, W, H - foot + 160);
+    // Header: tournament and match on the left, sponsors on the right.
+    tournamentMark(ctx, d, 60, 60, 80);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 420, 24, 700); text(ctx, d.tournament.name.toUpperCase(), 160, 96);
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 17, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 161, 124, 2);
+    sponsorRow(ctx, d, W - 60, 76, "right", "rgba(255,255,255,0.55)");
+    // Ribbon, name, result.
+    const y = H - 400;
+    ctx.fillStyle = acc; ctx.beginPath(); ctx.moveTo(W / 2 - 250, y); ctx.lineTo(W / 2 + 250, y); ctx.lineTo(W / 2 + 228, y + 54); ctx.lineTo(W / 2 - 228, y + 54); ctx.fill();
+    ctx.fillStyle = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF"; font(ctx, 26, 700, BODY); spaced(ctx, "PLAYER OF THE MATCH", W / 2, y + 37, 7, "center");
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.player.name.toUpperCase(), W - 120, 96, 700); text(ctx, d.player.name.toUpperCase(), W / 2, y + 154, "center");
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; fit(ctx, p.result || p.line || "", W - 140, 24, 500, BODY, 14); text(ctx, p.result || p.line || "", W / 2, y + 194, "center");
+    // Figures: the main tiles (runs, wickets, catches), a rate if there is only one, then MVP points.
+    const rate = new Set(["Strike rate", "Economy", "MVP points"]), tiles = p.tiles || [];
+    const main = tiles.filter((t) => !rate.has(t.k)).slice(0, 2);
+    if (main.length < 2) main.push(...tiles.filter((t) => t.k === "Strike rate" || t.k === "Economy").slice(0, 2 - main.length));
+    const cols = main.map((t) => [t.v + (t.s ? " " + t.s : ""), t.k.toUpperCase()]).concat(p.pts != null ? [[String(p.pts), "MVP POINTS"]] : []);
+    const cw = 300, x0 = W / 2 - (cols.length * cw) / 2;
+    cols.forEach(([v, lab], i) => {
+      const cx = x0 + cw * (i + 0.5);
+      if (i) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x0 + cw * i, y + 246, 2, 96); }
+      ctx.fillStyle = i === cols.length - 1 && p.pts != null ? acc : "#FFFFFF"; fit(ctx, v, cw - 40, 64, 700); text(ctx, v, cx, y + 306, "center");
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 16, 700, BODY); spaced(ctx, lab, cx, y + 336, 3, "center");
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.3)"; font(ctx, 14, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 40, H - 16, 4, "right");
+    grain(ctx, W, H, 0.05);
+  }
+
+  // A player-of-the-match's figures as lines: runs, wickets or catches, each with the rate that goes with it.
+  function potmLines(p) {
+    const tiles = p.tiles || [], rateOf = (k) => (tiles.find((t) => t.k === k) || {}).v;
+    return tiles.filter((t) => !["Strike rate", "Economy", "MVP points"].includes(t.k)).slice(0, 2).map((t) => ({
+      big: t.v, small: t.s || "", label: t.k.toUpperCase(),
+      sub: t.k === "Runs" && rateOf("Strike rate") ? `Strike rate ${rateOf("Strike rate")}` : /^Wicket/.test(t.k) && rateOf("Economy") ? `Economy ${rateOf("Economy")}` : "",
+    }));
+  }
+
+  // Spotlight for the player of the match: the milestone stage, the name, then the figures stacked.
+  function drawPotmSpotlight(ctx, W, H, th, d) {
+    const P = jerseyPalette(d), p = d.potm, dy = H - 1350, acc = P.mvp || P.accent, BG = mix(P.deep, "#000000", 0.35);
+    const words = d.player.name.trim().split(/\s+/), first = words.length > 1 ? words.slice(0, -1).join(" ") : "", last = words[words.length - 1];
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(720, 520 + dy * 0.4, 40, 720, 520 + dy * 0.4, 900 + dy * 0.3);
+    g.addColorStop(0, rgba(mix(P.base, "#FFFFFF", 0.08), 0.95)); g.addColorStop(0.55, rgba(P.deep, 0.7)); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    for (const [x0, w, a] of [[520, 160, 0.07], [760, 90, 0.05], [380, 60, 0.04]]) {
+      const l = ctx.createLinearGradient(0, 0, 0, H); l.addColorStop(0, `rgba(255,255,255,${a})`); l.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = l; ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + w, 0); ctx.lineTo(x0 + w + 260, H); ctx.lineTo(x0 + 120, H); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = rgba(P.glow, 0.09); font(ctx, 760, 700); text(ctx, "MVP", 720, 1000 + dy * 0.7, "center");
+    player(ctx, d.images.player, { cx: 770, bottom: H, h: d.images.player ? 1120 + dy * 0.85 : 760 + dy * 0.4, w: d.images.player ? 640 : 520 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, rgba(BG, 0.94)); g.addColorStop(0.45, rgba(BG, 0.6)); g.addColorStop(0.65, rgba(BG, 0));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    g = ctx.createLinearGradient(0, H - 420, 0, H); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(0.6, rgba(BG, 0.9)); g.addColorStop(1, BG);
+    ctx.fillStyle = g; ctx.fillRect(0, H - 420, W, 420);
+    tournamentMark(ctx, d, 60, 62, 84);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 440, 26, 700); text(ctx, d.tournament.name.toUpperCase(), 162, 98);
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 163, 128, 2);
+    sponsorRow(ctx, d, W - 60, 76, "right", "rgba(255,255,255,0.55)");
+    const y = dy * 0.5;
+    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, "PLAYER OF THE MATCH", 64, 310 + y, 8);
+    if (first) { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, first.toUpperCase(), 560, 46, 500); text(ctx, first.toUpperCase(), 62, 410 + y); }
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, last.toUpperCase(), 600, 140, 700); text(ctx, last.toUpperCase(), 56, 540 + y);
+    let ly = 700 + y;
+    for (const l of potmLines(p)) {
+      ctx.fillStyle = "#FFFFFF"; font(ctx, 150, 700); text(ctx, l.big, 56, ly);
+      if (l.small) { const bw = ctx.measureText(l.big).width; ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 54, 500); text(ctx, l.small, 70 + bw, ly); }
+      ctx.fillStyle = acc; font(ctx, 20, 700, BODY); spaced(ctx, l.label, 62, ly + 38, 4);
+      if (l.sub) { ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 22, 500, BODY); text(ctx, l.sub, 62, ly + 70); }
+      ly += 220;
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.fillRect(60, H - 154, 520, 2);
+    ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, p.result || "", 600, 24, 500, BODY, 14); text(ctx, p.result || "", 62, H - 110);
+    if (p.pts != null) {
+      ctx.fillStyle = acc; font(ctx, 44, 700); text(ctx, String(p.pts), 62, H - 54); const pw = ctx.measureText(String(p.pts)).width;
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 16, 700, BODY); spaced(ctx, "MVP POINTS", 76 + pw, H - 58, 3);
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 16, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 60, H - 54, 4, "right");
+    grain(ctx, W, H, 0.06);
+  }
+
+  // Split for the player of the match: "Player of the match" stacked on the jersey panel, figures in rows.
+  function drawPotmSplit(ctx, W, H, th, d) {
+    const P = jerseyPalette(d), p = d.potm, dy = H - 1350, acc = P.mvp || P.accent, BG = mix(P.deep, "#000000", 0.4);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createLinearGradient(W, 0, 400, H); g.addColorStop(0, P.mid); g.addColorStop(1, BG); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 2;
+    for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.arc(860, 560 + dy * 0.4, 120 + i * 44, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+    player(ctx, d.images.player, { cx: 780, bottom: H - 150, h: d.images.player ? 1080 + dy * 0.8 : 720 + dy * 0.4, w: d.images.player ? 600 : 480 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    ctx.save(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(490, 0); ctx.lineTo(400, H); ctx.lineTo(0, H); ctx.closePath();
+    g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, P.base); g.addColorStop(1, P.deep); ctx.fillStyle = g; ctx.fill(); ctx.clip();
+    ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.save(); ctx.translate(350, H - 50); ctx.rotate(-Math.PI / 2); fit(ctx, "POTM", H - 100, 520, 700); ctx.fillText("POTM", 0, 0); ctx.restore();
+    ctx.restore();
+    ctx.fillStyle = acc; ctx.beginPath(); ctx.moveTo(490, 0); ctx.lineTo(506, 0); ctx.lineTo(416, H); ctx.lineTo(400, H); ctx.fill();
+    tournamentMark(ctx, d, 60, 60, 80);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 380, 20, 700, BODY, 12); spaced(ctx, d.tournament.name.toUpperCase(), 60, 186, 2);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 60, 214, 2);
+    const y = dy * 0.5;
+    ctx.fillStyle = "#FFFFFF"; font(ctx, 86, 700); text(ctx, "PLAYER", 56, 360 + y); text(ctx, "OF THE", 56, 446 + y);
+    ctx.fillStyle = acc; text(ctx, "MATCH", 56, 532 + y);
+    let ly = 660 + y;
+    const rule = (yy) => { ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(60, yy, 320, 2); };
+    for (const l of potmLines(p)) {
+      rule(ly - 96);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, l.big, 300, 96, 700); text(ctx, l.big, 56, ly + 6);
+      if (l.small) { const bw = ctx.measureText(l.big).width; ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 38, 500); text(ctx, l.small, 66 + bw, ly + 6); }
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 20, 700, BODY); spaced(ctx, l.label, 60, ly + 40, 3);
+      ly += 170;
+    }
+    if (p.pts != null) {
+      rule(ly - 96);
+      ctx.fillStyle = acc; font(ctx, 64, 700); text(ctx, String(p.pts), 56, ly - 10);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 20, 700, BODY); spaced(ctx, "MVP POINTS", 60, ly + 24, 3);
+    }
+    sponsorRow(ctx, d, 60, H - 110, "left", "rgba(255,255,255,0.6)");
+    g = ctx.createLinearGradient(0, H - 230, 0, H); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(0.35, rgba(BG, 0.95)); ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(445, H - 230); ctx.lineTo(W, H - 230); ctx.lineTo(W, H); ctx.lineTo(416, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.player.name.toUpperCase(), 580, 66, 700); text(ctx, d.player.name.toUpperCase(), W - 50, H - 92, "right");
+    ctx.fillStyle = "rgba(255,255,255,0.65)"; fit(ctx, p.result || "", 560, 22, 500, BODY, 14); text(ctx, p.result || "", W - 52, H - 54, "right");
+    ctx.fillStyle = "rgba(255,255,255,0.4)"; font(ctx, 16, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 50, H - 22, 4, "right");
+    grain(ctx, W, H, 0.05);
+  }
+
   const DRAW = {
     schedule: drawSchedule, groups: drawGroups, lineup: drawLineup, versus: drawVersus, result: drawResult, table: drawTable,
     squad: drawSquad, leaders: drawLeaders, target: drawTarget, champions: drawChampions,
@@ -1066,6 +1217,7 @@
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone") { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
+    if (kind === "potm") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
     const K = KITS[style](th, W, H, d).use(ctx);
     if (HERO.has(kind)) (style === "B" ? drawHeroB : drawHeroA)(ctx, W, H, th, Object.assign(d, { kind }), K);
     else DRAW[kind](ctx, W, H, th, d, K);
