@@ -26,10 +26,11 @@
   const SQUAD_STYLES = [["R", "Roster"], ["C", "Captain"], ["N", "Numbers"]];
   const VERSUS_STYLES = [["C", "Clash"], ["F", "Frames"], ["S", "Stack"]];
   const TABLE_STYLES = [["L", "Ladder"], ["G", "Glass"], ["T", "Leader"]];
+  const LEADER_STYLES = [["S", "Spotlight"], ["P", "Podium"], ["B", "Board"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -2059,6 +2060,100 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Leaders: Spotlight, Podium and Board ----------
+
+  const leadImg = (d, i) => (d.images.players && d.images.players[i]) || (i === 0 ? d.images.player : null);
+  function leadFrame(ctx, W, H, d, italic) {
+    const ld = d.leaders, F = posterFrame(ctx, W, H, d, (ld.title || "Leaders").toUpperCase(), (ld.sub || "").toUpperCase(), italic);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, F.line, W - 140, 24, 600); spaced(ctx, F.line, W / 2 + 4, 270 + F.hy, 8, "center");
+    return F;
+  }
+  // A compact row: rank, face, name with team and detail, and the number.
+  function leadRow(ctx, W, d, r, i, y, h, acc) {
+    const T = teamTones(r.team, d), cy = y + h / 2, sk = h * 0.25;
+    ctx.fillStyle = "rgba(255,255,255,0.07)"; slant(ctx, 40, y, W - 80, h, sk); ctx.fill();
+    ctx.fillStyle = T.base; slant(ctx, 40, y, 96, h, sk); ctx.fill();
+    ctx.fillStyle = "#FFFFFF"; font(ctx, h * 0.5, 700); text(ctx, String(i + 1), 86, cy + h * 0.18, "center");
+    const fr = h * 0.38; faceRing(ctx, leadImg(d, i), r, T, 150 + fr, cy, fr);
+    logo(ctx, d.images.teams[i], r.team, 150 + fr * 2 + 34, cy, h * 0.42);
+    const nx = 150 + fr * 2 + 70, nm = r.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - nx - 200, Math.min(38, h * 0.36), 700); text(ctx, nm, nx, cy + (r.sub ? -2 : 12));
+    if (r.sub) { ctx.fillStyle = "rgba(255,255,255,0.65)"; fit(ctx, `${r.team.short} · ${r.sub}`, W - nx - 200, Math.min(20, h * 0.2), 500, BODY, 11); text(ctx, `${r.team.short} · ${r.sub}`, nx, cy + h * 0.3); }
+    ctx.fillStyle = acc; font(ctx, Math.min(60, h * 0.56), 700); text(ctx, String(r.value), W - 70, cy + Math.min(60, h * 0.56) * 0.36, "right");
+  }
+
+  // The leader big on a panel in their team's colours, the chasers below.
+  function drawLeadSpotlight(ctx, W, H, th, d) {
+    const ld = d.leaders, rows = ld.rows.slice(0, H > 1500 ? 8 : 5), F = leadFrame(ctx, W, H, d, true), { acc, hy } = F; if (!rows.length) return;
+    const first = rows[0], T = teamTones(first.team, d), y0 = 310 + hy * 2, ph = H > 1500 ? 560 : 440, sk = 70, img = leadImg(d, 0);
+    ctx.save(); slant(ctx, 30, y0, W - 60, ph, sk); const g = ctx.createLinearGradient(0, y0, W, y0 + ph); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.35)); ctx.fillStyle = g; ctx.shadowColor = rgba(T.base, 0.5); ctx.shadowBlur = 30; ctx.fill(); ctx.restore();
+    ctx.save(); slant(ctx, 30, y0, W - 60, ph, sk); ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,0.08)"; font(ctx, ph * 0.9, 700); text(ctx, String(first.value), W - 40, y0 + ph * 0.85, "right");
+    if (img) bust(ctx, img, 300, y0 + ph, ph * 1.02); else logo(ctx, d.images.teams[0], first.team, 290, y0 + ph / 2, ph * 0.6);
+    ctx.restore();
+    const tx = 560; ctx.fillStyle = acc; font(ctx, 24, 700, BODY); spaced(ctx, "#1 · LEADER", tx, y0 + 64, 6);
+    logo(ctx, d.images.teams[0], first.team, W - 120, y0 + 76, 96);
+    ctx.fillStyle = "#FFFFFF"; font(ctx, ph * 0.4, 700); text(ctx, String(first.value), tx, y0 + 70 + ph * 0.38);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 24, 700, BODY); spaced(ctx, (ld.unit || "").toUpperCase(), tx + 4, y0 + 110 + ph * 0.38, 5);
+    const words = first.name.toUpperCase().split(" "), l2 = words.length > 1 ? [words.slice(0, -1).join(" "), words[words.length - 1]] : [words[0]];
+    ctx.save(); ctx.font = `400 46px "Kaushan Script", cursive`; ctx.fillStyle = acc; if (l2.length > 1) { fit(ctx, first.name.split(" ").slice(0, -1).join(" "), W - tx - 70, 46, 400, '"Kaushan Script", cursive'); text(ctx, first.name.split(" ").slice(0, -1).join(" "), tx, y0 + ph - 96); } ctx.restore();
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, l2[l2.length - 1], W - tx - 70, 66, 700); text(ctx, l2[l2.length - 1], tx, y0 + ph - 40);
+    if (first.sub) { ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, first.sub, W - tx - 80, 20, 600, BODY, 12); text(ctx, first.sub, tx, y0 + ph - 12 + 0); }
+    const rest = rows.slice(1), ry = y0 + ph + 34, n = Math.max(1, rest.length), gap = 10, rh = Math.min(H > 1500 ? 130 : 104, (F.bottom - 30 - ry - gap * (n - 1)) / n);
+    rest.forEach((r, j) => leadRow(ctx, W, d, r, j + 1, ry + j * (rh + gap), rh, acc));
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // The top three on a podium, each in their team's colours; the rest in rows.
+  function drawLeadPodium(ctx, W, H, th, d) {
+    const ld = d.leaders, rows = ld.rows.slice(0, H > 1500 ? 8 : 5), F = leadFrame(ctx, W, H, d, false), { acc, hy, P } = F; if (!rows.length) return;
+    const gl = ctx.createRadialGradient(W / 2, 520 + hy, 20, W / 2, 520 + hy, 600); gl.addColorStop(0, rgba(acc, 0.22)); gl.addColorStop(1, rgba(acc, 0)); ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+    const rest = rows.slice(3), rowsH = rest.length ? rest.length * (H > 1500 ? 120 : 96) + 30 : 0, base = F.bottom - 20 - rowsH, cw = (W - 80) / 3;
+    const steps = [[1, 0.62], [0, 0.82], [2, 0.5]], top0 = 310 + hy * 2, avail = base - top0;
+    steps.forEach(([i, k]) => {
+      const r = rows[i]; if (!r) return;
+      const T = teamTones(r.team, d), col = i === 0 ? 1 : i === 1 ? 0 : 2, x = 40 + col * cw, sh = avail * 0.32 * (i === 0 ? 1.25 : i === 1 ? 1 : 0.8), sy = base - sh, img = leadImg(d, i);
+      const ph = avail - sh - 40, py = sy - ph * k;
+      ctx.save(); ctx.beginPath(); ctx.rect(x + 6, py - 60, cw - 12, sy - py + 60); ctx.clip();
+      const gp = ctx.createLinearGradient(0, py, 0, sy); gp.addColorStop(0, rgba(T.base, 0)); gp.addColorStop(1, rgba(T.base, 0.85)); ctx.fillStyle = gp; ctx.fillRect(x + 6, py, cw - 12, sy - py);
+      if (img) bust(ctx, img, x + cw / 2, sy, Math.min(ph * k + 20, cw * 1.25)); else logo(ctx, d.images.teams[i], r.team, x + cw / 2, sy - ph * k * 0.45, cw * 0.6);
+      ctx.restore();
+      const gs = ctx.createLinearGradient(0, sy, 0, base); gs.addColorStop(0, T.base); gs.addColorStop(1, mix(T.deep, "#000000", 0.35)); ctx.fillStyle = gs; ctx.fillRect(x + 6, sy, cw - 12, sh);
+      ctx.fillStyle = i === 0 ? acc : "rgba(255,255,255,0.85)"; ctx.fillRect(x + 6, sy, cw - 12, 6);
+      ctx.fillStyle = "rgba(255,255,255,0.12)"; font(ctx, sh * 0.9, 700); text(ctx, String(i + 1), x + cw - 16, sy + sh * 0.9, "right");
+      ctx.fillStyle = "#FFFFFF"; font(ctx, Math.min(96, sh * 0.42), 700); text(ctx, String(r.value), x + cw / 2, sy + Math.min(96, sh * 0.42) + 14, "center");
+      const nm = r.name.toUpperCase(); fit(ctx, nm, cw - 36, 32, 700); text(ctx, nm, x + cw / 2, sy + Math.min(96, sh * 0.42) + 56, "center");
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 20, 700, BODY); spaced(ctx, r.team.short || "", x + cw / 2 + 2, sy + Math.min(96, sh * 0.42) + 86, 3, "center");
+      if (i === 0) { const cr = 34; ctx.beginPath(); ctx.arc(x + cw / 2, py - 46, cr, 0, 7); ctx.fillStyle = acc; ctx.fill(); ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; font(ctx, 34, 700); text(ctx, "1", x + cw / 2, py - 34, "center"); }
+    });
+    const rh = H > 1500 ? 110 : 86; rest.forEach((r, j) => leadRow(ctx, W, d, r, j + 3, base + 30 + j * (rh + 10), rh, acc));
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 700, BODY); spaced(ctx, (ld.unit || "").toUpperCase(), W / 2, top0 - 4 + 0, 6, "center");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // A leaderboard with photos and bars that measure each number against the leader's.
+  function drawLeadBoard(ctx, W, H, th, d) {
+    const ld = d.leaders, rows = ld.rows.slice(0, H > 1500 ? 8 : 6), F = leadFrame(ctx, W, H, d, true), { acc, hy } = F; if (!rows.length) return;
+    const max = Math.max(...rows.map((r) => parseFloat(r.value) || 0), 1), y0 = 320 + hy * 2, n = rows.length, gap = 14;
+    const h1 = Math.min(H > 1500 ? 230 : 190, (F.bottom - 20 - y0) * 0.3), rh = Math.min(H > 1500 ? 150 : 120, (F.bottom - 20 - y0 - h1 - gap * (n - 1)) / Math.max(1, n - 1));
+    rows.forEach((r, i) => {
+      const T = teamTones(r.team, d), h = i ? rh : h1, y = i ? y0 + h1 + gap + (i - 1) * (rh + gap) : y0, cy = y + h / 2, img = leadImg(d, i), frac = (parseFloat(r.value) || 0) / max;
+      ctx.save(); roundRect(ctx, 40, y, W - 80, h, 18); ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(40, y, W - 80, h);
+      const bw = (W - 80) * (0.35 + 0.65 * frac), gb = ctx.createLinearGradient(40, 0, 40 + bw, 0); gb.addColorStop(0, rgba(T.base, 0.95)); gb.addColorStop(1, rgba(mix(T.base, T.deep, 0.5), i ? 0.6 : 0.85)); ctx.fillStyle = gb; ctx.fillRect(40, y, bw, h);
+      ctx.fillStyle = i ? "rgba(255,255,255,0.5)" : acc; ctx.fillRect(40 + bw - 4, y, 4, h);
+      if (img) bust(ctx, img, 40 + h * 0.75, y + h, h * 1.08); else { const fr = h * 0.36; faceRing(ctx, null, r, T, 40 + h * 0.75, cy, fr); }
+      ctx.restore();
+      ctx.fillStyle = "rgba(255,255,255,0.95)"; font(ctx, h * (i ? 0.34 : 0.26), 700); text(ctx, String(i + 1), 60, y + h * (i ? 0.42 : 0.34), "left");
+      const nx = 40 + h * 1.5, nm = r.name.toUpperCase();
+      ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 8; fit(ctx, nm, W - nx - (i ? 250 : 380), i ? Math.min(40, h * 0.34) : 58, 700); text(ctx, nm, nx, y + h * 0.66); ctx.shadowBlur = 0;
+      const sub = [r.team.short, r.sub].filter(Boolean).join(" · "); ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, sub, W - nx - 240, i ? Math.min(19, h * 0.17) : 22, 500, BODY, 11); text(ctx, sub, nx, y + h * 0.88);
+      logo(ctx, d.images.teams[i], r.team, W - (i ? 200 : 320), cy, h * (i ? 0.42 : 0.4));
+      ctx.fillStyle = i ? "#FFFFFF" : acc; font(ctx, i ? Math.min(64, h * 0.5) : Math.min(120, h * 0.6), 700); text(ctx, String(r.value), W - 66, cy + (i ? Math.min(64, h * 0.5) : Math.min(120, h * 0.6)) * 0.36, "right");
+      if (!i) { ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, 20, 700, BODY); spaced(ctx, (ld.unit || "").toUpperCase(), W - 66, cy + h * 0.38, 4, "right"); }
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -2075,6 +2170,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "leaders") { ({ S: drawLeadSpotlight, P: drawLeadPodium, B: drawLeadBoard })[style](ctx, W, H, th, d); return cv; }
     if (kind === "table") { ({ L: drawTableLadder, G: drawTableGlass, T: drawTableLeader })[style](ctx, W, H, th, d); return cv; }
     if (kind === "versus") { ({ C: drawVsClash, F: drawVsFrames, S: drawVsStack })[style](ctx, W, H, th, d); return cv; }
     if (kind === "squad") { ({ R: drawSquadRoster, C: drawSquadCaptain, N: drawSquadNumbers })[style](ctx, W, H, th, d); return cv; }
