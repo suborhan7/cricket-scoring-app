@@ -162,6 +162,7 @@
   // ---------- Player page ----------
 
   async function openPlayer(id) {
+    if (CSA.hub) CSA.hub.forgetCareer(id);
     S.player = { id, loading: true };
     ui.go("player", { id });
     const [p, teams] = await Promise.all([
@@ -207,7 +208,7 @@
       ${p.jersey_no != null ? `<span class="hero-jersey">${p.jersey_no}</span>` : ""}</div>
       <section class="wrap stack">
         ${facts ? `<div class="facts">${facts}</div>` : ""}
-        ${stats}
+        ${CSA.hub ? CSA.hub.careerHtml(p.id) : stats}
         ${mine ? `<p class="note">This is you. You can change your photo and details.</p>` : ""}
         ${actions ? `<div class="stack-s">${actions}</div>` : ""}
       </section>`;

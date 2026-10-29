@@ -59,7 +59,7 @@
     L.mine = null; L.me = undefined; L.myTeams = null;
     if (L.user) { loadMine(); loadMe(); syncPending(); } else ui.render();
   }
-  sb.auth.getSession().then(({ data }) => { setUser(data.session && data.session.user); openLink(); });
+  sb.auth.getSession().then(({ data }) => { L.ready = true; setUser(data.session && data.session.user); openLink(); if (CSA.hub) CSA.hub.runPending(); });
   window.addEventListener("hashchange", openLink);
   sb.auth.onAuthStateChange((_e, session) => setUser(session && session.user));
 
@@ -388,23 +388,27 @@
     if (!L.tour || L.tour.id !== id) L.tour = { id, loading: true };
     ui.go("tour", { id, tab: tab || (L.tour.tab) || "matches" });
     L.tour.tab = ui.view().tab;
-    const [t, teams, matches, roles] = await Promise.all([
+    const [t, teams, matches, roles, handed] = await Promise.all([
       sb.from("tournaments").select("*").eq("id", id).single(),
       sb.from("tournament_teams").select("group_name, teams(id, name, short_name, logo_path, primary_color, secondary_color, team_players(count))").eq("tournament_id", id),
       sb.from("matches").select("*").eq("tournament_id", id).order("starts_at", { ascending: true, nullsFirst: false }).order("created_at"),
       L.user ? sb.from("tournament_members").select("role").eq("tournament_id", id).eq("user_id", L.user.id) : Promise.resolve({ data: [] }),
+      // Matches handed over to this user (migration 0012); none before that.
+      L.user ? sb.from("match_scorers").select("match_id").eq("user_id", L.user.id) : Promise.resolve({ data: [] }),
     ]);
     const err = t.error || teams.error || matches.error || roles.error;
     L.tour = {
       id, tab: L.tour.tab, loading: false, error: err ? errText(err) : "",
       t: t.data, matches: matches.data || [], roles: (roles.data || []).map((r) => r.role),
+      scoreMatches: handed.error ? [] : (handed.data || []).map((r) => r.match_id),
       teams: (teams.data || []).filter((r) => r.teams).map((r) => Object.assign({ group: r.group_name, count: (r.teams.team_players[0] || {}).count || 0 }, r.teams)),
     };
     rerender("tour");
   }
 
   const isOrganiser = () => L.tour && L.tour.roles.includes("organiser");
-  const canScore = () => L.tour && (L.tour.roles.includes("organiser") || L.tour.roles.includes("scorer"));
+  // Organisers and scorers score every match; someone handed a match scores just that one.
+  const canScore = () => L.tour && (L.tour.roles.includes("organiser") || L.tour.roles.includes("scorer") || (L.tour.scoreMatches || []).includes(L.tour.curMatch));
   const teamById = (id) => (L.tour.teams || []).find((x) => x.id === id) || { name: "Team", short_name: "?" };
 
   ui.screens.tour = (view) => {
@@ -716,8 +720,9 @@
   async function openMatch(id) {
     const m = L.tour.matches.find((x) => x.id === id);
     if (!m) return;
+    L.tour.curMatch = m.id;
     const local = S.get(m.id);
-    if (local && canScore() && !local.readOnly) return ui.openMatch(local);
+    if (local && canScore() && !local.readOnly && !local.handedOver) return ui.openMatch(local);
     if (m.status === "scheduled") {
       if (!canScore()) return ui.toast("This match hasn't started yet.");
       return startForm(m);
@@ -739,8 +744,11 @@
     rec.events = events.data.map((r) => r.event);
     rec.synced = rec.events.map((e) => JSON.stringify(e));
     rec.cloudStatus = m.status;
-    rec.readOnly = !canScore();
-    if (!rec.readOnly) S.save(rec);
+    // After handing the match over, this phone only watches until the user takes it back.
+    const before = S.get(m.id);
+    rec.handedOver = !!(before && before.handedOver);
+    rec.readOnly = !canScore() || rec.handedOver;
+    if (canScore()) S.save(rec);
     ui.openMatch(rec);
   }
 
@@ -935,6 +943,27 @@
     await openMatch(hit[2]);
   }
 
+  // ---------- Handing scoring to a teammate ----------
+  // The scorer shares a one-time link (…/#/takeover/<code>). Whoever opens it, signed in,
+  // becomes a scorer for this match only and carries on from the last synced ball.
+
+  ui.cloudHandover = async (rec) => {
+    if (!L.user) return ui.toast("Sign in to hand over this match.");
+    if (pending(rec)) { ui.toast("Saving the last balls first…"); await syncRec(rec); if (pending(rec)) return ui.toast("No signal yet. Hand over once the balls are synced."); }
+    const { data, error } = await sb.rpc("make_handover", { m: rec.match.cloud.matchId });
+    if (error) return ui.toast(/function|schema/.test(error.message) ? "Handing over needs a database update first." : error.message);
+    const t = rec.match.teams, url = `${location.origin}${location.pathname}#/takeover/${data}`;
+    let sent = true;
+    try {
+      if (navigator.share) await navigator.share({ title: "Take over scoring", text: `Take over scoring ${t[0].name} v ${t[1].name}. Open this link (works once):`, url });
+      else { await navigator.clipboard.writeText(url); ui.toast("Link copied. Paste it in WhatsApp."); }
+    } catch (e) { if (e && e.name === "AbortError") sent = false; else window.prompt("Copy this link", url); }
+    if (!sent || !confirm("Sent? This phone stops scoring and just follows the match. You can take it back later.")) return;
+    rec.handedOver = true; rec.readOnly = true;
+    S.save(rec);
+    ui.render();
+  };
+
   // ---------- Change log ----------
   // The database keeps every change to a saved ball (event_edits). Shown under the scorecard.
 
@@ -1053,6 +1082,17 @@
       else ui.actions.home();
     },
     "refresh-match"() { refreshWatched(false); },
+    async "resume-cloud"() {
+      const rec = ui.current();
+      if (!rec || !confirm("Score on this phone again? Only do this if the other phone has stopped.")) return;
+      rec.handedOver = false;
+      L.tour = null;
+      await openTour(rec.match.cloud.tournamentId, "matches");
+      const m = L.tour.matches.find((x) => x.id === rec.match.cloud.matchId);
+      const cur = S.get(rec.match.id);
+      if (cur) { cur.handedOver = false; S.save(cur); }
+      if (m) watchMatch(m, true);
+    },
     async share(d) {
       const url = shareUrl(d.kind, d.id), title = d.title || "Live score";
       try {
@@ -1107,7 +1147,7 @@
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
-    feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
+    openMatch, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();

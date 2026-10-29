@@ -405,3 +405,5 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .theme-btn { color: var(--board-ink); }
 .bar { border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .toast-act { color: var(--on-turf); }
+.watch-col { flex-direction: column; align-items: stretch; }
+.watch-col p { margin: 0; }
