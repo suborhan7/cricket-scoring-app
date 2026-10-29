@@ -50,10 +50,11 @@ test("engagement card captions", () => {
   assert.match(C.caption("potm", { tournament: tour, player: { name: "Rakib", team: "Dhaka Tigers" }, potm: { figures: "54 (31) · 2/18 in 4 ov", result: "Dhaka Tigers won by 5 wickets" } }), /^Player of the match: Rakib \(Dhaka Tigers\)! 54 \(31\) · 2\/18 in 4 ov\.\nDhaka Tigers won by 5 wickets/);
 });
 
-test("player cards come in Broadcast and Poster only; other cards in all three looks", () => {
+test("milestone cards have Spotlight and Split; other player cards Broadcast and Poster; the rest all three looks", () => {
   assert.deepEqual(C.stylesFor("potm").map(([k]) => k), ["A", "B"]);
   assert.deepEqual(C.stylesFor("award").map(([k]) => k), ["A", "B"]);
   assert.deepEqual(C.stylesFor("schedule").map(([k]) => k), ["A", "B", "C"]);
+  assert.deepEqual(C.stylesFor("milestone"), [["S", "Spotlight"], ["P", "Split"]]);
 });
 
 test("captions for groups, runners-up and tournament awards", () => {
