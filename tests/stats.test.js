@@ -76,3 +76,23 @@ test("records list single innings: highest scores, best figures, sixes", () => {
   assert.deepEqual(L.sixes.map((x) => [x.id, x.sixes]), [["p1", 6]]);
   assert.deepEqual(L.fours.map((x) => [x.id, x.fours]), [["p2", 8], ["p1", 5]]);
 });
+
+test("player of the match points", () => {
+  const team = (name) => ({ name, short: name.slice(0, 3), players: ["A", "B", "C", "D"] });
+  const match = { teams: [team("Tigers"), team("Lions")], battingFirst: 0, rules: { oversPerSide: 1, maxOversPerBowler: 1 } };
+  const s = E.replay(match, [
+    { t: "openers", striker: 0, nonStriker: 1, bowler: 3 },
+    { t: "ball", runs: 6 }, { t: "ball", runs: 4 }, { t: "ball", runs: 0 },
+    { t: "ball", runs: 0, wicket: { kind: "caught", fielder: 2 } }, { t: "batter", player: 2 },
+    { t: "ball", runs: 0 }, { t: "ball", runs: 1 },
+  ]);
+  const list = St.mvp(match, s);
+  const bat = list.find((x) => x.team === 0 && x.player === 0);
+  assert.equal(bat.pts, 10 + 1 + 2); // 10 runs, a four, a six
+  const bowl = list.find((x) => x.team === 1 && x.player === 3);
+  assert.equal(bowl.pts, 20 + 3); // a wicket and three dot balls
+  assert.equal(list[0], bowl);
+  const catcher = list.find((x) => x.team === 1 && x.player === 2);
+  assert.equal(catcher.pts, 8);
+  assert.equal(catcher.line, "1 catch");
+});

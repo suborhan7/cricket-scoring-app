@@ -758,6 +758,7 @@
       match: {
         id: m.id, createdAt: Date.now(), teams: [team(m.team1_id, 0), team(m.team2_id, 1)],
         battingFirst: m.batting_first || 0, toss: m.toss || { winner: 0, decision: "bat" }, rules: m.rules && m.rules.oversPerSide ? m.rules : rulesOf(L.tour.t),
+        info: { tournament: L.tour && L.tour.t ? L.tour.t.name : null, venue: m.venue || null, startsAt: m.starts_at || null },
         cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id], playerIds: m.lineups ? m.lineups.teams.map((x) => x.players) : null },
       },
       events: [],

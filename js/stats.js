@@ -96,7 +96,51 @@
     return { runs, wickets, scores, figures: figures.filter((x) => x.wickets > 0), sixes, fours };
   }
 
-  const api = { summarize, pointsTable, leaders };
+  // Player of the match points, simple enough to explain on one line:
+  // a run 1 (+1 for a four, +2 for a six, +8 at 30, +16 at 50), a wicket 20 (+8 at 3),
+  // a dot ball bowled 1, a maiden 12, a catch, stumping or run-out 8.
+  const MVP_RULES = "1 a run, +1 a four, +2 a six, 20 a wicket, 1 a dot ball, 12 a maiden, 8 a catch, stumping or run-out, plus bonuses at 30 and 50 runs and 3 wickets.";
+  function mvp(match, s) {
+    const all = new Map();
+    const get = (team, player) => {
+      const k = team + ":" + player;
+      if (!all.has(k)) all.set(k, { team, player, name: match.teams[team].players[player], pts: 0, runs: 0, balls: 0, wickets: 0, conceded: 0, bowled: 0, catches: 0, runouts: 0, stumpings: 0 });
+      return all.get(k);
+    };
+    const bpo = E.settings(match).ballsPerOver;
+    for (const inn of s.innings) {
+      for (const b of inn.batters) {
+        if (!b.balls && !b.out) continue;
+        const x = get(inn.batting, b.player);
+        x.runs += b.runs; x.balls += b.balls;
+        x.pts += b.runs + b.fours + 2 * b.sixes + (b.runs >= 50 ? 16 : b.runs >= 30 ? 8 : 0);
+        const o = b.out;
+        if (o && o.fielder != null && ["caught", "stumped", "runout"].includes(o.kind)) {
+          const f = get(inn.bowling, o.fielder);
+          f.pts += 8;
+          if (o.kind === "caught") f.catches++; else if (o.kind === "stumped") f.stumpings++; else f.runouts++;
+        }
+      }
+      const dots = new Map();
+      for (const over of inn.overs) for (const ball of over) if (ball.legal && ball.runs === 0 && ball.bowler != null) dots.set(ball.bowler, (dots.get(ball.bowler) || 0) + 1);
+      for (const b of inn.bowlers) {
+        if (!b.balls) continue;
+        const x = get(inn.bowling, b.player);
+        x.wickets += b.wickets; x.conceded += b.runs; x.bowled += b.balls;
+        x.pts += 20 * b.wickets + (b.wickets >= 3 ? 8 : 0) + 12 * b.maidens + (dots.get(b.player) || 0);
+      }
+    }
+    const plural = (n, one) => `${n} ${one}${n === 1 ? "" : one === "catch" ? "es" : "s"}`;
+    return [...all.values()].filter((x) => x.pts > 0).map((x) => Object.assign(x, {
+      line: [
+        x.balls ? `${x.runs} (${x.balls})` : "",
+        x.bowled ? `${x.wickets}/${x.conceded} in ${E.oversText(x.bowled, bpo)} ov` : "",
+        x.catches ? plural(x.catches, "catch") : "", x.stumpings ? plural(x.stumpings, "stumping") : "", x.runouts ? plural(x.runouts, "run-out") : "",
+      ].filter(Boolean).join(" · "),
+    })).sort((a, b) => b.pts - a.pts || b.runs - a.runs || b.wickets - a.wickets);
+  }
+
+  const api = { summarize, pointsTable, leaders, mvp, MVP_RULES };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.CSA = Object.assign(root.CSA || {}, { stats: api });
 })(typeof window !== "undefined" ? window : globalThis);
