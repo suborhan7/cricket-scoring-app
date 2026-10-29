@@ -204,7 +204,8 @@
       ${row(inn.striker, true)}${row(inn.nonStriker, false)}
       <div class="prow prow-bowl"><span class="pname">${bw ? esc(name(inn.bowling, bw.player)) : "Next bowler?"}</span>
         ${bw ? `<span class="pfig">${E.oversText(bw.balls, ru.ballsPerOver)}-${bw.maidens}-${bw.runs}-<b>${bw.wickets}</b></span><span class="pmeta">Econ ${econ(bw.runs, bw.balls, ru.ballsPerOver)}</span>` : ""}</div>
-      <div class="over"><span class="over-label">${over.length ? "This over" : "Last over"}</span><div class="balls">${balls || '<span class="muted">No balls yet</span>'}</div></div>
+      <div class="over"><span class="over-label">${over.length ? "This over" : "Last over"}</span><div class="balls">${balls || '<span class="muted">No balls yet</span>'}</div>
+        ${s.next === "ball" && !rec.readOnly && !rec.paused ? `<button class="swap-btn" data-act="swap" aria-label="Swap strike">⇄ Swap</button>` : ""}</div>
     </div>`;
   }
 
@@ -230,12 +231,18 @@
       <button class="btn btn-primary btn-big" data-act="openers">Start innings</button></div>`;
   }
 
+  // One calm panel: runs on top, extras under them, then Undo, OUT and More under the thumb.
+  // Colour only marks what matters (boundaries, extras, the wicket), not every key.
   function keypad() {
-    const k = (n) => `<button class="key key-run ${n === 4 || n === 6 ? "key-bnd" : ""}" data-act="run" data-n="${n}">${n === 0 ? "0<small>dot</small>" : n}</button>`;
-    return `<div class="keypad">
-      ${k(0)}${k(1)}${k(2)}${k(3)}
-      ${k(4)}${k(6)}<button class="key key-x" data-act="sheet" data-k="wd">Wide</button><button class="key key-x" data-act="sheet" data-k="nb">No ball</button>
-      <button class="key key-x" data-act="sheet" data-k="b">Bye</button><button class="key key-x" data-act="sheet" data-k="lb">Leg bye</button><button class="key key-out" data-act="sheet" data-k="out">Out</button>
+    const sub = { 0: "dot", 4: "four", 6: "six" };
+    const k = (n) => `<button class="key key-run ${n === 4 || n === 6 ? "key-bnd" : ""}" data-act="run" data-n="${n}">${n}${sub[n] ? `<small>${sub[n]}</small>` : ""}</button>`;
+    const x = (kind, label) => `<button class="key key-x" data-act="sheet" data-k="${kind}">${label}</button>`;
+    return `<div class="keypad pad">
+      ${[0, 1, 2, 3, 4, 6].map(k).join("")}
+      ${x("wd", "Wide")}${x("nb", "No ball")}${x("b", "Bye")}${x("lb", "Leg bye")}
+      <button class="key key-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}><span aria-hidden="true">↶</span>Undo</button>
+      <button class="key key-out" data-act="sheet" data-k="out">Out</button>
+      <button class="key key-tool" data-act="sheet" data-k="more"><span aria-hidden="true">⋯</span>More</button>
     </div>`;
   }
 
@@ -253,9 +260,9 @@
     else action = `<div class="result"><p class="result-text">${esc(s.result.text)}</p>
       <button class="btn btn-primary btn-big" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="match-back">All matches</button></div>`;
 
-    let tools = s.next === "done" ? "" : `<div class="tools">
+    // The keypad carries Undo and More itself; picking a player still needs them.
+    let tools = s.next === "done" || s.next === "ball" ? "" : `<div class="tools">
         <button class="btn btn-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}>Undo</button>
-        <button class="btn btn-tool" data-act="swap" ${s.next === "ball" ? "" : "disabled"}>Swap strike</button>
         <button class="btn btn-tool" data-act="sheet" data-k="more">More</button></div>`;
     // After handing a quick match over, this phone stops scoring until the user takes it back.
     if (rec.paused && s.next !== "done") {
@@ -421,41 +428,86 @@
 
   // ---------- Scorecard ----------
 
+  // The match page: four tabs so nobody scrolls one long page to find the overs or the MVP.
+  const SECTIONS = [["card", "Scorecard"], ["overs", "Overs"], ["mvp", "MVP"], ["info", "Info"]];
+
   function cardView() {
-    const s = st(), ru = rules(), t = rec.match.teams;
+    const s = st(), t = rec.match.teams;
     const played = s.innings.filter((i) => i.batters.length);
     const tab = Math.min(view.tab, Math.max(0, played.length - 1));
-    const inn = played[tab];
-    const tabs = played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("");
-    if (!inn) return `<header class="bar"><button class="icon-btn" data-act="back-score" aria-label="Back">←</button><h1>Scorecard</h1></header><p class="empty wrap">No balls bowled yet.</p>`;
+    const inn = played[tab], sec = view.sec || "card";
+    const head = `<header class="bar"><button class="icon-btn" data-act="back-score" aria-label="Back">←</button><h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1></header>
+      <nav class="sec-tabs" role="tablist">${SECTIONS.map(([k, label]) => `<button class="sec-tab ${k === sec ? "on" : ""}" role="tab" aria-selected="${k === sec}" data-act="sec" data-s="${k}">${label}</button>`).join("")}</nav>`;
+    const result = s.result ? `<p class="result-text">${esc(s.result.text)}</p>` : "";
+    if (sec === "info") return head + `<section class="wrap stack">${result}${infoTab(s)}</section>`;
+    if (sec === "mvp") return head + `<section class="wrap stack">${result}${mvpTab(s)}</section>`;
+    if (!inn) return head + `<p class="empty wrap">No balls bowled yet.</p>`;
+    const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
+    return head + `<section class="wrap stack">${result}${tabs}${sec === "overs" ? oversTab(inn) : scorecardTab(inn)}${sec === "card" ? CSA.ui.cardExtra(rec) : ""}</section>`;
+  }
+
+  function scorecardTab(inn) {
+    const ru = rules(), t = rec.match.teams;
     const bat = inn.batters.map((b) => `<tr><td><span class="pname">${esc(name(inn.batting, b.player))}</span><small>${esc(E.dismissalText(rec.match, inn, b.out))}</small></td>
       <td><b>${b.runs}</b></td><td>${b.balls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr(b.runs, b.balls)}</td></tr>`).join("");
     const bowl = inn.bowlers.map((b) => `<tr><td><span class="pname">${esc(name(inn.bowling, b.player))}</span></td><td>${E.oversText(b.balls, ru.ballsPerOver)}</td><td>${b.maidens}</td><td>${b.runs}</td><td><b>${b.wickets}</b></td><td>${econ(b.runs, b.balls, ru.ballsPerOver)}</td></tr>`).join("");
     const x = inn.extras, ext = x.wd + x.nb + x.b + x.lb;
     const yet = t[inn.batting].players.map((_, i) => i).filter((i) => !inn.batters.some((b) => b.player === i)).map((i) => esc(name(inn.batting, i)));
-    const fow = inn.fow.map((f) => `${f.runs}-${f.wicket} (${esc(name(inn.batting, f.player))}, ${f.over})`).join(", ");
-    // The scorer can tap any ball here to fix it; fans just see the balls.
+    const fow = inn.fow.map((f) => `<li><span>${f.wicket}. ${esc(name(inn.batting, f.player))}</span><span><b>${f.runs}</b> <small>(${f.over} ov)</small></span></li>`).join("");
+    return `<div class="table-wrap"><table class="tbl"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${bat}</tbody></table></div>
+        <p class="line"><span>Extras</span><span><b>${ext}</b> (wd ${x.wd}, nb ${x.nb}, b ${x.b}, lb ${x.lb})</span></p>
+        <p class="line line-total"><span>Total</span><span><b>${inn.runs}/${inn.wickets}</b> (${E.oversText(inn.legalBalls, ru.ballsPerOver)} ov) · RR ${econ(inn.runs, inn.legalBalls, ru.ballsPerOver)}</span></p>
+        ${yet.length ? `<p class="muted"><b>Yet to bat:</b> ${yet.join(", ")}</p>` : ""}
+        <div class="table-wrap"><table class="tbl"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowl}</tbody></table></div>
+        ${fow ? `<h2 class="eyebrow">Fall of wickets</h2><ol class="fow-list">${fow}</ol>` : ""}`;
+  }
+
+  // Newest over first, each as a card: who bowled, every ball, the over's runs and the score after it.
+  function oversTab(inn) {
     const fixable = !rec.readOnly;
     const ballEl = (b) => {
       const cls = `ball ${b.wicket ? "b-w" : b.extra ? "b-x" : b.runs === 4 ? "b-4" : b.runs === 6 ? "b-6" : b.runs === 0 ? "b-0" : ""}`, label = b.label === "0" ? "•" : esc(b.label);
       return fixable ? `<button class="${cls} ball-fix" data-act="fix-ball" data-i="${b.index}" aria-label="Fix this ball: ${esc(b.label)}">${label}</button>` : `<span class="${cls}">${label}</span>`;
     };
-    const overs = inn.overs.filter((o) => o.length).map((o, n) => `<li><span class="over-n">${n + 1}</span><span class="balls">${o.map(ballEl).join("")}</span><b>${o.reduce((a, b) => a + b.runs, 0)}</b></li>`).join("");
-    return `<header class="bar"><button class="icon-btn" data-act="back-score" aria-label="Back">←</button><h1>Scorecard</h1></header>
-      <section class="wrap stack">
-        ${s.result ? `<p class="result-text">${esc(s.result.text)}</p>` : ""}
-        <p class="muted">${esc(t[rec.match.toss.winner].name)} won the toss and chose to ${rec.match.toss.decision}. ${ru.oversPerSide} overs a side.</p>
-        <div class="tabs">${tabs}</div>
-        <div class="table-wrap"><table class="tbl"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${bat}</tbody></table></div>
-        <p class="line"><span>Extras</span><span><b>${ext}</b> (wd ${x.wd}, nb ${x.nb}, b ${x.b}, lb ${x.lb})</span></p>
-        <p class="line line-total"><span>Total</span><span><b>${inn.runs}/${inn.wickets}</b> (${E.oversText(inn.legalBalls, ru.ballsPerOver)} ov)</span></p>
-        ${yet.length ? `<p class="muted">Yet to bat: ${yet.join(", ")}</p>` : ""}
-        ${fow ? `<p class="muted"><b>Fall of wickets:</b> ${fow}</p>` : ""}
-        <div class="table-wrap"><table class="tbl"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowl}</tbody></table></div>
-        <h2 class="eyebrow">Over by over</h2>${fixable ? `<p class="muted small">Scored a ball wrong? Tap it to fix it. Every total updates by itself.</p>` : ""}<ol class="overs-list">${overs}</ol>
-        ${CSA.ui.cardExtra(rec)}
-      </section>`;
+    let runs = 0, wkts = 0;
+    const cards = inn.overs.filter((o) => o.length).map((o, n) => {
+      const r = o.reduce((a, b) => a + b.runs, 0);
+      runs += r; wkts += o.filter((b) => b.wicket).length;
+      const bw = o[0].bowler != null ? esc(name(inn.bowling, o[0].bowler)) : "";
+      return `<li class="over-card"><div class="oc-n"><b>Ov ${n + 1}</b><small>${runs}-${wkts}</small></div>
+        <div class="oc-body">${bw ? `<span class="oc-who">${bw}</span>` : ""}<span class="balls">${o.map(ballEl).join("")}</span></div>
+        <div class="oc-runs"><b>${r}</b><small>run${r === 1 ? "" : "s"}</small></div></li>`;
+    }).reverse().join("");
+    return `${fixable ? `<p class="muted small">Scored a ball wrong? Tap it to fix it. Every total updates by itself.</p>` : ""}<ol class="overs-cards">${cards}</ol>`;
   }
+
+  function mvpTab(s) {
+    const list = CSA.stats.mvp(rec.match, s).slice(0, 5), t = rec.match.teams;
+    if (!list.length) return `<p class="empty">The MVP list fills in as the match goes on.</p>`;
+    return `<ol class="mvp-list">${list.map((x, i) => `<li class="mvp-row ${i === 0 ? "mvp-top" : ""}"><span class="mvp-rank">${i + 1}</span>
+        <span class="avatar" aria-hidden="true">${esc(initials(x.name))}</span>
+        <span class="mvp-text"><b>${esc(x.name)}</b><small>${esc(t[x.team].name)}${x.line ? " · " + esc(x.line) : ""}</small></span>
+        <span class="mvp-pts"><b>${x.pts}</b><small>pts</small></span></li>`).join("")}</ol>
+      <p class="muted small">How points work: ${esc(CSA.stats.MVP_RULES)}</p>`;
+  }
+
+  function infoTab(s) {
+    const m = rec.match, ru = rules(), t = m.teams, info = m.info || {};
+    const when = info.startsAt || m.createdAt;
+    const row = (k, v) => v ? `<div class="info-row"><span>${k}</span><span>${v}</span></div>` : "";
+    const squad = (i) => `<div class="squad-col"><b>${esc(t[i].name)}</b><ol>${t[i].players.map((p) => `<li>${esc(p)}</li>`).join("")}</ol></div>`;
+    return `<div class="card info-card">
+        ${row("Tournament", info.tournament ? esc(info.tournament) : "")}
+        ${row("Match", `${esc(t[0].name)} v ${esc(t[1].name)}`)}
+        ${row("Toss", `${esc(t[m.toss.winner].name)}, chose to ${m.toss.decision}`)}
+        ${row("Overs", `${ru.oversPerSide} a side, up to ${ru.maxOversPerBowler} per bowler`)}
+        ${row("Venue", info.venue ? esc(info.venue) : "")}
+        ${row("Date", when ? new Date(when).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) : "")}
+      </div>
+      <h2 class="eyebrow">Squads</h2><div class="squads">${squad(0)}${squad(1)}</div>`;
+  }
+
+  const initials = (n) => String(n).trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
 
   // ---------- Render and input ----------
 
@@ -487,7 +539,8 @@
     toss(d) { setup.tossWinner = +d.i; render(); },
     decision(d) { setup.decision = d.d; render(); },
     start: startMatch,
-    card() { closeSheet(); view = { screen: "card", tab: st().current }; render(); },
+    card() { closeSheet(); view = { screen: "card", tab: st().current, sec: "card" }; render(); },
+    sec(d) { view.sec = d.s; render(); window.scrollTo(0, 0); },
     "back-score"() { view = { screen: "score", tab: 0 }; render(); },
     tab(d) { view.tab = +d.n; render(); },
     run(d) { push({ t: "ball", runs: +d.n }); },

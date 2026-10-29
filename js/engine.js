@@ -100,7 +100,7 @@
 
     inn.runs += total; bowl.runs += charged; inn.overRuns += charged;
     if (legal) { inn.legalBalls++; bowl.balls++; }
-    inn.overs[inn.overs.length - 1].push({ label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, index });
+    inn.overs[inn.overs.length - 1].push({ label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, index, bowler: inn.bowler });
 
     if (ex === "nb") inn.freeHit = rules.freeHit; else if (legal) inn.freeHit = false;
 
