@@ -172,19 +172,22 @@
 
   // ---------- Score ----------
 
+  // The score as one card: who is batting, the big score with overs beside it, then the rates.
   function scoreboard(s) {
     const ru = rules(), inn = s.innings[s.current], t = rec.match.teams;
     const ch = E.chase(rec.match, s);
     const crr = inn.legalBalls ? ((inn.runs * ru.ballsPerOver) / inn.legalBalls).toFixed(2) : "0.00";
-    let sub = `CRR ${crr}`;
-    if (ch && !s.result) sub = ch.ballsLeft > 0 ? `Need <b>${ch.need}</b> from <b>${ch.ballsLeft}</b> · RRR ${ch.rrr.toFixed(2)}` : "";
-    const first = s.current === 1 ? `<span class="sb-first">${esc(t[s.innings[0].batting].short)} ${s.innings[0].runs}/${s.innings[0].wickets}</span>` : "";
-    return `<div class="scoreboard">
-      <div class="sb-top"><span class="sb-team">${esc(t[inn.batting].name)}</span>${first}</div>
+    const stat = (k, v) => `<span class="sb-stat">${k} <b>${v}</b></span>`;
+    let stats = stat("CRR", crr);
+    if (ch && !s.result && ch.ballsLeft > 0) stats += `<span class="sb-stat sb-need">Need <b>${ch.need}</b> off <b>${ch.ballsLeft}</b></span>` + stat("RRR", ch.rrr.toFixed(2));
+    if (inn.freeHit && !s.result) stats += `<span class="pill pill-free">FREE HIT</span>`;
+    const tag = s.current === 1 ? `${esc(t[s.innings[0].batting].short)} ${s.innings[0].runs}/${s.innings[0].wickets}` : "1st innings";
+    return `<div class="scoreboard"><div class="sb-card">
+      <div class="sb-top"><span class="sb-badge" aria-hidden="true">${esc(t[inn.batting].short.slice(0, 3))}</span><span class="sb-team">${esc(t[inn.batting].name)}</span><span class="sb-tag">${tag}</span></div>
       <div class="sb-main"><span class="sb-score">${inn.runs}<span class="sb-slash">/</span>${inn.wickets}</span>
-        <span class="sb-overs">${E.oversText(inn.legalBalls, ru.ballsPerOver)}<small> / ${ru.oversPerSide}</small></span></div>
-      <div class="sb-sub">${sub}${inn.freeHit && !s.result ? ` <span class="pill pill-free">FREE HIT</span>` : ""}</div>
-    </div>`;
+        <span class="sb-overs">${E.oversText(inn.legalBalls, ru.ballsPerOver)}<small> / ${ru.oversPerSide} ov</small></span></div>
+      <div class="sb-sub">${stats}</div>
+    </div></div>`;
   }
 
   function playersBlock(s) {
@@ -281,7 +284,7 @@
     }
     // The whole pad fits one screen: score on top, keypad and tools at the bottom under the thumb.
     return `<div class="score-screen"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
-        <h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small" data-act="card">Scorecard</button></header>
+        <h1 class="score-title">${esc(t[0].name)} <em>v</em> ${esc(t[1].name)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small btn-card" data-act="card">Scorecard</button></header>
       ${scoreboard(s)}
       <section class="wrap stack-s score-body">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section></div>`;
   }

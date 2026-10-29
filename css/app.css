@@ -514,3 +514,31 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .squad-col ol { margin: 6px 0 0; padding-left: 26px; }
 .squad-col li { padding: 2px 0; overflow-wrap: anywhere; }
 .mvp-top .avatar { background: var(--surface); }
+
+/* Scoring screen header: a light bar with the match name, then the score as one green card. */
+.score-screen .bar { background: var(--paper); color: var(--ink); border-bottom: 0; padding-bottom: 6px; }
+.score-screen .bar .icon-btn { color: var(--ink); }
+.score-title { min-width: 0; font-family: var(--body) !important; font-size: 1rem !important; font-weight: 600 !important; letter-spacing: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score-title em { opacity: 0.5; }
+.score-screen .bar .btn-card { background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
+.score-screen .scoreboard { background: none; color: var(--ink); padding: 0 16px; }
+.sb-card { --hero-ink: #F2F7F4; background: linear-gradient(140deg, #13603C 0%, #0C3523 100%); color: var(--hero-ink); border-radius: 20px; padding: 14px 16px 14px; box-shadow: 0 6px 18px rgba(8, 40, 25, 0.18); }
+:root[data-theme="dark"] .sb-card { background: linear-gradient(140deg, #16402B 0%, #0D1F16 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sb-card { background: linear-gradient(140deg, #16402B 0%, #0D1F16 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); } }
+.sb-card .sb-top { display: flex; align-items: center; gap: 8px; opacity: 1; font-size: 0.95rem; }
+.sb-badge { width: 28px; height: 28px; border-radius: 50%; flex: none; display: grid; place-items: center; background: rgba(255, 255, 255, 0.16); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; }
+.sb-card .sb-team { flex: 1; font-weight: 600; }
+.sb-tag { flex: none; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sb-card .sb-main { margin-top: 6px; justify-content: flex-start; gap: 14px; }
+.score-screen .sb-card .sb-score { font-size: clamp(2.6rem, 6.6dvh, 3.5rem); }
+.score-screen .sb-card .sb-overs { font-size: 1.45rem; opacity: 0.95; }
+.score-screen .sb-card .sb-overs small { font-size: 0.9rem; opacity: 0.65; }
+.score-screen .sb-card .sb-sub { margin-top: 8px; gap: 6px; font-size: 0.85rem; min-height: 0; opacity: 1; }
+.sb-stat { padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); white-space: nowrap; }
+.sb-stat b { color: #fff; font-weight: 700; }
+.sb-need b { color: var(--lime); }
+@media (max-height: 700px) {
+  .score-screen .sb-card .sb-top { display: flex; }
+  .sb-card { padding: 10px 14px; }
+  .score-screen .sb-card .sb-sub { margin-top: 4px; }
+}
