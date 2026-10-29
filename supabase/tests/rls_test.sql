@@ -361,5 +361,32 @@ do $$ begin
 exception when unique_violation then null;
 end $$;
 
+-- Scoring hand-over: the scorer makes a link; a stranger who takes it can score that match
+-- only, the link works once, and strangers can't make links.
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  perform public.make_handover('40000000-0000-0000-0000-000000000001');
+  raise exception 'a stranger made a hand-over link';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.blocked($q$insert into public.match_events (match_id, seq, event) values ('40000000-0000-0000-0000-000000000001', 900, '{"t":"ball","runs":1}')$q$);
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+create temp table hand as select public.make_handover('40000000-0000-0000-0000-000000000001') as code;
+grant select on hand to anon, authenticated;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if (public.take_handover((select code from hand)) ->> 'match') <> '40000000-0000-0000-0000-000000000001' then raise exception 'hand-over returned the wrong match'; end if;
+end $$;
+insert into public.match_events (match_id, seq, event) values ('40000000-0000-0000-0000-000000000001', 900, '{"t":"ball","runs":1}');
+do $$ begin
+  if public.has_role('10000000-0000-0000-0000-000000000001', '{scorer}') then raise exception 'hand-over made a tournament scorer'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+do $$ begin
+  perform public.take_handover((select code from hand));
+  raise exception 'a hand-over link worked twice';
+exception when no_data_found then null;
+end $$;
+
 reset role;
 \echo 'All security checks passed'

@@ -55,7 +55,11 @@
       const label = { fifty: "Fifty", hundred: "Hundred", threefor: "Three-for", fivefor: "Five-for" }[m.kind];
       toast(`${label} card ready: ${who} ${what}. Tap to open.`, { act: "milestone-card", i: String(m.index) });
     }
-    if (after.current !== before.current && !after.result) toast(`Innings break. Target ${after.innings[0].runs + 1}`);
+    if (after.current !== before.current && !after.result) {
+      // A quick match lives only on this phone, so the break is a good moment for a backup.
+      if (!rec.match.cloud) toast(`Innings break. Target ${after.innings[0].runs + 1}. Tap to send a backup link.`, { act: "backup-link" });
+      else toast(`Innings break. Target ${after.innings[0].runs + 1}`);
+    }
     closeSheet();
     render();
   }
@@ -253,15 +257,73 @@
         <button class="btn btn-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}>Undo</button>
         <button class="btn btn-tool" data-act="swap" ${s.next === "ball" ? "" : "disabled"}>Swap strike</button>
         <button class="btn btn-tool" data-act="sheet" data-k="more">More</button></div>`;
+    // After handing a quick match over, this phone stops scoring until the user takes it back.
+    if (rec.paused && s.next !== "done") {
+      tools = "";
+      action = `<div class="watch watch-col"><p><b>Scoring moved to another phone.</b><br><span class="muted">This copy stops at the ball you handed over.</span></p>
+        <button class="btn" data-act="resume-here">Score on this phone again</button></div>`;
+    }
     // Someone watching a tournament match (not its scorer) sees the score without the pad.
     if (rec.readOnly) {
       tools = "";
-      if (s.next !== "done") action = `<div class="watch"><p class="muted">Live score from the ground.</p><button class="btn" data-act="refresh-match">Refresh</button></div>`;
+      if (s.next !== "done") action = rec.handedOver
+        ? `<div class="watch watch-col"><p><b>You handed scoring to someone else.</b><br><span class="muted">This phone follows the live score.</span></p>
+            <div class="row-2"><button class="btn" data-act="refresh-match">Refresh</button><button class="btn" data-act="resume-cloud">Score here again</button></div></div>`
+        : `<div class="watch"><p class="muted">Live score from the ground.</p><button class="btn" data-act="refresh-match">Refresh</button></div>`;
     }
     return `<header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
         <h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small" data-act="card">Scorecard</button></header>
       ${scoreboard(s)}
       <section class="wrap stack-s">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section>`;
+  }
+
+  // ---------- Hand over and backup links (quick matches) ----------
+  // The whole match (teams, rules and every ball) travels in the link itself, squeezed with
+  // deflate, so it needs no account and no server: …/#/score/<data>.
+
+  const b64 = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const unb64 = (str) => Uint8Array.from(atob(str.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  async function squeeze(bytes, way) {
+    const stream = new Blob([bytes]).stream().pipeThrough(way === "in" ? new CompressionStream("deflate-raw") : new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function matchLink(r) {
+    const json = new TextEncoder().encode(JSON.stringify({ v: 1, match: r.match, events: r.events }));
+    const data = typeof CompressionStream === "function" ? "z" + b64(await squeeze(json, "in")) : "u" + b64(json);
+    return `${location.origin}${location.pathname}#/score/${data}`;
+  }
+  async function readMatchLink() {
+    const hit = /^#\/score\/([uz])([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if (!hit) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    try {
+      let bytes = unb64(hit[2]);
+      if (hit[1] === "z") bytes = await squeeze(bytes, "out");
+      const got = JSON.parse(new TextDecoder().decode(bytes));
+      E.replay(got.match, got.events); // throws on a broken link
+      const mine = S.get(got.match.id);
+      if (mine && mine.events.length > got.events.length && !confirm("This phone already has more balls of this match than the link. Replace them with the link's version?")) return;
+      rec = { match: got.match, events: got.events };
+      S.save(rec);
+      closeSheet(); view = { screen: "score", tab: 0 }; render();
+      toast(`You're scoring ${got.match.teams[0].short} v ${got.match.teams[1].short} now, from ball ${got.events.filter((e) => e.t === "ball").length + 1}.`);
+    } catch (e) { toast("That scoring link is broken. Ask for a new one."); }
+  }
+  window.addEventListener("hashchange", readMatchLink);
+  setTimeout(readMatchLink, 0);
+
+  async function shareMatchLink(r, handover) {
+    const url = await matchLink(r), t = r.match.teams;
+    const text = handover ? `Take over scoring ${t[0].name} v ${t[1].name}. Open this link and carry on:` : `Backup of ${t[0].name} v ${t[1].name}. Open it to carry on scoring if my phone dies:`;
+    try {
+      if (navigator.share) await navigator.share({ title: handover ? "Take over scoring" : "Match backup", text, url });
+      else { await navigator.clipboard.writeText(`${text} ${url}`); toast("Link copied. Paste it in WhatsApp."); }
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return false;
+      window.prompt("Copy this link", url);
+      return true;
+    }
   }
 
   // ---------- Bottom sheets ----------
@@ -283,6 +345,8 @@
     if (sheet.kind === "more") body = `<h2>More</h2><div class="stack-s">
         ${inn.striker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.striker}">Retire ${esc(name(inn.batting, inn.striker))} (hurt)</button>` : ""}
         ${inn.nonStriker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.nonStriker}">Retire ${esc(name(inn.batting, inn.nonStriker))} (hurt)</button>` : ""}
+        <button class="btn" data-act="handover">Hand over scoring to someone else</button>
+        ${rec.match.cloud ? "" : `<button class="btn btn-ghost" data-act="backup-link">Send a backup link</button>`}
         <button class="btn btn-danger" data-act="end-innings">End this innings now</button></div>`;
     if (sheet.kind === "out") body = outForm(inn, t);
     if (sheet.kind === "fix") body = fixForm();
@@ -441,6 +505,22 @@
       if (a === b) { const e = document.getElementById("op-error"); e.textContent = "Pick two different openers."; e.hidden = false; return; }
       push({ t: "openers", striker: a, nonStriker: b, bowler: w });
     },
+    async handover() {
+      closeSheet();
+      if (rec.match.cloud) return CSA.ui.cloudHandover(rec);
+      if (!(await shareMatchLink(rec, true))) return;
+      if (!confirm("Sent? Scoring stops on this phone so the two copies don't split. You can take it back later.")) return;
+      rec.paused = true; S.save(rec); render();
+    },
+    async "backup-link"() {
+      document.getElementById("toast").hidden = true;
+      closeSheet();
+      if (rec && !rec.match.cloud) await shareMatchLink(rec, false);
+    },
+    "resume-here"() {
+      if (!confirm("Score on this phone again? Only do this if the other phone has stopped, or the two copies will differ.")) return;
+      rec.paused = false; S.save(rec); render();
+    },
     "fix-ball"(d) { openFix(+d.i); },
     "fix-del"(d) { sheet.delivery = d.v; sheet.error = ""; renderSheet(); },
     "fix-runs"(d) { sheet.runs = +d.v; renderSheet(); },
@@ -506,6 +586,7 @@
     esc, toast, shortName, PRESETS, actions, render, APP, localMatches, installBanner,
     screens: {},
     tabbar: () => "",
+    cloudHandover: () => toast("Sign in to hand over a tournament match."),
     lastTab: "home",
     matchBadge: () => "",
     cardExtra: () => "",

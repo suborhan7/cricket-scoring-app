@@ -213,30 +213,36 @@
 
   // ---------- Profile ----------
 
-  async function loadCareer() {
-    const id = L.me.id;
-    H.career = { id, loading: true };
-    const { data, error } = await sb.from("matches").select("id, team1_id, team2_id, status, summary, winner_team_id")
+  // A player's finished matches, loaded once per player; the numbers are worked out per
+  // tournament filter from these.
+  const careers = {};
+  async function loadCareer(id) {
+    careers[id] = { loading: true, pick: "all" };
+    const { data, error } = await sb.from("matches").select("id, tournament_id, team1_id, team2_id, status, summary, winner_team_id, tournaments(id, name, short_name)")
       .eq("status", "done").contains("lineups", { teams: [{ players: [id] }] }).limit(500);
-    if (!H.career || H.career.id !== id) return;
-    const all = CSA.stats.leaders(data || []);
-    H.career = { id, error: error ? errText(error) : "", played: (data || []).length,
-      bat: all.runs.find((x) => x.id === id), bowl: all.wickets.find((x) => x.id === id) };
-    lg.rerender("profile");
+    careers[id] = { error: error ? errText(error) : "", matches: data || [], pick: "all" };
+    lg.rerender("profile", "player");
   }
 
-  function careerHtml() {
-    if (!H.career || H.career.id !== L.me.id) { loadCareer(); return `<p class="muted">Loading your stats…</p>`; }
-    const C = H.career;
-    if (C.loading) return `<p class="muted">Loading your stats…</p>`;
+  function careerHtml(id) {
+    const C = careers[id];
+    if (!C) { loadCareer(id); return `<p class="muted">Loading stats…</p>`; }
+    if (C.loading) return `<p class="muted">Loading stats…</p>`;
     if (C.error) return `<p class="error">${esc(C.error)}</p>`;
+    const tours = new Map();
+    for (const m of C.matches) if (m.tournaments) tours.set(m.tournament_id, m.tournaments);
+    const ms = C.pick === "all" ? C.matches : C.matches.filter((m) => m.tournament_id === C.pick);
+    const all = CSA.stats.leaders(ms), b = all.runs.find((x) => x.id === id), w = all.wickets.find((x) => x.id === id);
     const tile = (n, label) => `<div class="tile"><b>${n}</b><span>${label}</span></div>`;
-    const b = C.bat, w = C.bowl;
-    return `<h2 class="eyebrow">Career</h2>
-      <div class="tiles">${tile(C.played, "Matches")}${tile(b ? b.runs : 0, "Runs")}${tile(w ? w.wickets : 0, "Wickets")}</div>
+    const chip = (v, l) => `<button class="chip ${C.pick === v ? "on" : ""}" data-act="career-pick" data-p="${id}" data-v="${v}">${esc(l)}</button>`;
+    const chips = tours.size > 1 || (tours.size === 1 && C.pick !== "all")
+      ? `<div class="chips chips-scroll">${chip("all", "All matches")}${[...tours.entries()].map(([k, t]) => chip(k, t.short_name || t.name)).join("")}</div>` : "";
+    const title = C.pick === "all" ? "Career" : esc((tours.get(C.pick) || {}).name || "Tournament");
+    return `<h2 class="eyebrow">${title}</h2>${chips}
+      <div class="tiles">${tile(ms.length, "Matches")}${tile(b ? b.runs : 0, "Runs")}${tile(w ? w.wickets : 0, "Wickets")}</div>
       ${b ? `<h3 class="eyebrow">Batting</h3><div class="tiles">${tile(`${b.best}${b.bestOut ? "" : "*"}`, "Highest")}${tile(b.avg != null ? b.avg.toFixed(1) : "–", "Average")}${tile(b.sr.toFixed(1), "Strike rate")}${tile(b.fifties, "50s")}${tile(b.hundreds, "100s")}${tile(b.sixes, "Sixes")}</div>` : ""}
       ${w && w.balls ? `<h3 class="eyebrow">Bowling</h3><div class="tiles">${tile(`${w.bestW}/${w.bestR}`, "Best")}${tile(w.econ.toFixed(2), "Economy")}${tile(w.overs, "Overs")}</div>` : ""}
-      ${C.played ? "" : `<p class="muted small">Your numbers fill in after your first finished match.</p>`}`;
+      ${ms.length ? "" : `<p class="muted small">The numbers fill in after the first finished match.</p>`}`;
   }
 
   function accountHtml() {
@@ -258,7 +264,7 @@
         <div class="hero-text"><h2>${esc(p.full_name)}</h2><p>${esc(sq.playerLine(p) || "Add your role and style")}</p></div>
         ${p.jersey_no != null ? `<span class="hero-jersey">${p.jersey_no}</span>` : ""}</div>
       <section class="wrap stack">
-        ${careerHtml()}
+        ${careerHtml(p.id)}
         ${section("Teams", teams.length ? `<ul class="t-list">${teams.map(teamRow).join("")}</ul>` : `<p class="muted">You're not in a team yet. Create one, or open your captain's invite link.</p>`)}
         <button class="btn btn-ghost" data-act="p-open" data-id="${p.id}">See my public profile</button>
         ${accountHtml()}
@@ -381,7 +387,7 @@
   const setPending = (v) => { try { v ? localStorage.setItem(PEND, JSON.stringify(v)) : localStorage.removeItem(PEND); } catch (e) {} };
 
   function readLinks() {
-    const hit = /^#\/(tjoin|tmjoin)\/([0-9a-f-]{36})$/i.exec(location.hash);
+    const hit = /^#\/(tjoin|tmjoin|takeover)\/([0-9a-f-]{36})$/i.exec(location.hash);
     if (!hit) return;
     history.replaceState(null, "", location.pathname + location.search);
     setPending({ kind: hit[1], code: hit[2] });
@@ -390,11 +396,20 @@
 
   async function runPending() {
     const p = getPending();
-    if (!p) return;
+    if (!p || !L.ready) return; // waits until the sign-in state is known
     if (!L.user) {
       const f = form("account", { mode: "up" });
-      f.note = p.kind === "tjoin" ? "Sign in or create an account to put your team in the tournament." : "Sign in or create an account to join the team.";
+      f.note = { tjoin: "Sign in or create an account to put your team in the tournament.", tmjoin: "Sign in or create an account to join the team.", takeover: "Sign in or create an account to take over scoring." }[p.kind];
       return ui.go("account");
+    }
+    if (p.kind === "takeover") {
+      setPending(null);
+      const { data, error } = await sb.rpc("take_handover", { code: p.code });
+      if (error) return ui.toast(/function|schema/.test(error.message) ? "Taking over needs a database update first." : error.message);
+      L.tour = null;
+      await lg.openTour(data.tournament, "matches");
+      await lg.openMatch(data.match);
+      return ui.toast("You're the scorer now. Carry on from the last ball.");
     }
     if (L.me === undefined || L.myTeams == null) return; // meLoaded runs this again
     if (p.kind === "tmjoin") {
@@ -430,6 +445,7 @@
       ui.lastTab = d.tab;
       if (d.tab === "tours" && L.user && !L.mine) lg.loadMine();
       if (d.tab === "home") lg.loadFeed();
+      if (d.tab === "profile" && L.me) delete careers[L.me.id];
       ui.go(d.tab);
       window.scrollTo(0, 0);
     },
@@ -455,6 +471,7 @@
       if (!L.user) { form("account", { mode: "in" }).note = "Sign in to ask to join with your team."; return ui.go("account"); }
       startPick("request", L.tour.t);
     },
+    "career-pick"(d) { if (careers[d.p]) { careers[d.p].pick = d.v; ui.render(); } },
     "theme-toggle"() { setTheme(isDark() ? "light" : "dark"); },
     "theme-set"(d) { setTheme(d.v); },
     "tj-pick"(d) { H.pick.team = d.id; ui.render(); },
@@ -464,6 +481,9 @@
   });
 
   CSA.hub = {
+    runPending,
+    careerHtml,
+    forgetCareer(id) { delete careers[id]; },
     // After loading the user's profile and teams: finish any invite link that was waiting.
     meLoaded() { lg.rerender("home", "tours", "teams", "profile"); runPending(); },
     // A team made while picking one for a tournament goes back to the picker, already chosen.
