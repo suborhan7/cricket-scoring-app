@@ -340,15 +340,16 @@
   // A team's squad, captain first, in the team's own colours.
   async function squadCard(T, teamId) {
     const t = lg.teamById(teamId), ti = tournamentInfo(T.t);
-    const { data, error } = await sb.from("teams").select("captain_player_id, team_players(joined_at, players(id, full_name, role, jersey_no))").eq("id", teamId).single();
+    const { data, error } = await sb.from("teams").select("captain_player_id, team_players(joined_at, players(id, full_name, role, jersey_no, photo_path))").eq("id", teamId).single();
     if (error) { ui.toast(lg.errText(error)); return null; }
     const list = (data.team_players || []).filter((r) => r.players).sort((a, b) => String(a.joined_at).localeCompare(String(b.joined_at)));
-    const players = list.map((r) => ({ id: r.players.id, name: r.players.full_name, role: r.players.role, no: r.players.jersey_no, cap: r.players.id === data.captain_player_id }));
+    const players = list.map((r) => ({ id: r.players.id, name: r.players.full_name, role: r.players.role, no: r.players.jersey_no, wk: r.players.role === "keeper", cap: r.players.id === data.captain_player_id, photo: r.players.photo_path ? url("photos", r.players.photo_path) : "" }));
     players.sort((a, b) => Number(b.cap) - Number(a.cap));
     if (!players.length) { ui.toast("This team has no players yet."); return null; }
     const cap = players.find((p) => p.cap);
     const d = base({ ti }, { colors: [t.primary_color || ti.info.c1, t.secondary_color || ti.info.c2], squad: { team: teamInfo(t), captain: cap ? cap.name : "", sub: T.t.kind === "series" ? "Series squad" : "", players } });
     d.urls.teams = [logoOf(t)];
+    d.urls.players = players.map((p) => p.photo);
     return { kind: "squad", data: d, title: `${t.short_name} squad` };
   }
 

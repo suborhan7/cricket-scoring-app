@@ -23,10 +23,11 @@
   const SCHEDULE_STYLES = [["T", "Timeline"], ["W", "Showdown"]];
   const GROUP_STYLES = [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]];
   const LINEUP_STYLES = [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]];
+  const SQUAD_STYLES = [["R", "Roster"], ["C", "Captain"], ["N", "Numbers"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1734,6 +1735,111 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Squad: Roster, Captain and Numbers ----------
+
+  const SQ_ROLE = { batter: "BAT", bowler: "BOWL", allrounder: "AR", keeper: "WK" };
+  const initialsOf = (n) => String(n || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  function hueOf(h) {
+    const [r, g, b] = hexRgb(h).map((v) => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (!d) return { h: 0, s: 0 };
+    const hh = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return { h: hh * 60, s: d / (1 - Math.abs(mx + mn - 1) || 1) };
+  }
+  // The team's colours for a squad card. A red shirt is toned towards the tournament colour, so the card isn't all red.
+  function squadTones(d) {
+    const t = d.squad.team, tp = teamPalette(t), P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542");
+    const { h, s } = hueOf(tp.base), red = s > 0.35 && (h < 18 || h > 335);
+    return { tp, P, red, base: red ? mix(tp.base, P.base, 0.65) : tp.base, deep: red ? mix(tp.deep, P.deep, 0.7) : tp.deep, hi: red ? (d.squad.team.c2 && hueOf(d.squad.team.c2).s > 0.35 ? d.squad.team.c2 : P.accent) : tp.base, acc: tp.mvp || tp.accent };
+  }
+  function squadBg(ctx, W, H, T) {
+    ctx.fillStyle = mix(T.deep, "#000000", 0.45); ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W * 0.75, 160, 40, W * 0.75, 160, 1000); g.addColorStop(0, rgba(T.red ? T.tp.base : T.base, T.red ? 0.35 : 0.85)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (T.red) { const g2 = ctx.createRadialGradient(80, 300, 30, 80, 300, 800); g2.addColorStop(0, rgba(T.P.base, 0.6)); g2.addColorStop(1, rgba(T.P.base, 0)); ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H); }
+  }
+  function squadHead(ctx, W, d, T, y) {
+    const sq = d.squad, t = sq.team, ls = 150;
+    logo(ctx, d.images.teams[0], t, 40 + ls / 2, y + ls / 2, ls);
+    ctx.fillStyle = T.acc; fit(ctx, `${d.tournament.name} · ${sq.sub || "Squad"}`.toUpperCase(), W - 270, 22, 600); spaced(ctx, `${d.tournament.name} · ${sq.sub || "Squad"}`.toUpperCase(), 210, y + 34, 6);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, (t.name || "").toUpperCase(), W - 260, 96, 700); text(ctx, (t.name || "").toUpperCase(), 206, y + 118);
+    const line = [`${sq.players.length} players`, sq.captain ? `Captain ${sq.captain}` : ""].filter(Boolean).join(" · ").toUpperCase();
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; fit(ctx, line, W - 270, 22, 600, BODY, 12); spaced(ctx, line, 210, y + 152, 3);
+  }
+  // A player's face in a ring: the head of a cut-out, a photo cropped to fit, or initials.
+  function faceRing(ctx, img, p, T, cx, cy, r) {
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fillStyle = mix(T.deep, "#000000", 0.2); ctx.fill(); ctx.clip();
+    if (img && cutout(img)) { const b = cutBox(img), s = b.w * 0.62; ctx.drawImage(img, b.x + b.w / 2 - s / 2, b.y - s * 0.04, s, s, cx - r, cy - r * 0.92, 2 * r, 2 * r); }
+    else if (img) { const k = Math.max((2 * r) / img.width, (2 * r) / img.height); ctx.drawImage(img, cx - (img.width * k) / 2, cy - r - (img.height * k - 2 * r) * 0.1, img.width * k, img.height * k); }
+    else { ctx.fillStyle = T.hi; font(ctx, r * 0.8, 700); text(ctx, initialsOf(p.name), cx, cy + r * 0.28, "center"); }
+    ctx.restore(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.strokeStyle = T.hi; ctx.lineWidth = 3; ctx.stroke();
+  }
+  const squadList = (d, H) => d.squad.players.slice(0, H > 1500 ? 30 : 24);
+
+  function drawSquadRoster(ctx, W, H, th, d) {
+    const T = squadTones(d), ps = squadList(d, H), imgs = d.images.players || []; squadBg(ctx, W, H, T); squadHead(ctx, W, d, T, 40 + (H - 1350) * 0.15);
+    const n = ps.length, cols = n > 12 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 1.5, (H - 50 - y0 - gap * (rows - 1)) / rows);
+    ps.forEach((p, i) => {
+      const X = 30 + (i % cols) * (tw + gap), Y = y0 + Math.floor(i / cols) * (th2 + gap), img = imgs[i], nh = Math.max(40, th2 * 0.3), no = p.no != null ? String(p.no) : "";
+      ctx.save(); roundRect(ctx, X, Y, tw, th2, 14); const g = ctx.createLinearGradient(0, Y, 0, Y + th2); g.addColorStop(0, rgba(T.base, p.cap ? 0.95 : 0.6)); g.addColorStop(1, rgba(mix(T.deep, "#000000", 0.4), 0.95)); ctx.fillStyle = g; ctx.fill(); ctx.clip();
+      ctx.fillStyle = img ? "rgba(255,255,255,0.12)" : rgba(T.hi, 0.55); font(ctx, th2 * 0.62, 700); text(ctx, no, img ? X + tw - 8 : X + tw / 2, Y + th2 * 0.6, img ? "right" : "center");
+      if (img) bust(ctx, img, X + tw / 2, Y + th2 - nh + 4, th2 - nh - 6);
+      ctx.fillStyle = rgba(mix(T.deep, "#000000", 0.5), 0.92); ctx.fillRect(X, Y + th2 - nh, tw, nh);
+      ctx.restore();
+      const nm = p.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, tw - 16, nh * 0.42, 700); text(ctx, nm, X + tw / 2, Y + th2 - nh * 0.46, "center");
+      const sub = [no ? `#${no}` : "", SQ_ROLE[p.role] || ""].filter(Boolean).join(" · ");
+      ctx.fillStyle = T.acc; font(ctx, nh * 0.26, 700, BODY); spaced(ctx, sub, X + tw / 2 + 1, Y + th2 - nh * 0.14, 2, "center");
+      if (p.cap || p.wk) pill(ctx, p.cap ? "C" : "WK", X + 8, Y + 22, 28, p.cap ? T.acc : "rgba(0,0,0,0.5)", p.cap ? "#0B0D12" : "#FFFFFF");
+    });
+    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22); }
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  function drawSquadCaptain(ctx, W, H, th, d) {
+    const T = squadTones(d), sq = d.squad, imgs = d.images.players || [], ci = Math.max(0, sq.players.findIndex((p) => p.cap)), cap = sq.players[ci], img = imgs[ci];
+    squadBg(ctx, W, H, T);
+    ctx.save(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(470, 0); ctx.lineTo(380, H); ctx.lineTo(0, H); ctx.closePath(); ctx.clip();
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.3)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.08)"; font(ctx, 520, 700); text(ctx, cap.no != null ? String(cap.no) : sq.team.short || "", 230, 760 + (H - 1350) * 0.4, "center");
+    if (img) bust(ctx, img, 230, H - 150, 760 + (H - 1350) * 0.5);
+    const sh = ctx.createLinearGradient(0, H - 420, 0, H); sh.addColorStop(0, "rgba(0,0,0,0)"); sh.addColorStop(1, rgba(mix(T.deep, "#000000", 0.6), 0.95)); ctx.fillStyle = sh; ctx.fillRect(0, H - 420, W, 420);
+    ctx.restore();
+    logo(ctx, d.images.teams[0], sq.team, 100, 110, 130);
+    ctx.fillStyle = T.acc; font(ctx, 22, 700, BODY); spaced(ctx, "CAPTAIN", 44, H - 150, 6);
+    const parts = cap.name.split(" "), first = parts.length > 1 ? parts[0] : "", last = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
+    ctx.fillStyle = "#FFFFFF"; if (first) { fit(ctx, first.toUpperCase(), 330, 44, 600); text(ctx, first.toUpperCase(), 40, H - 96); } fit(ctx, last.toUpperCase(), 330, 72, 700); text(ctx, last.toUpperCase(), 40, H - 34);
+    const X = 470, dy = (H - 1350) * 0.2;
+    ctx.fillStyle = T.acc; fit(ctx, d.tournament.name.toUpperCase(), W - X - 40, 22, 600); spaced(ctx, d.tournament.name.toUpperCase(), X, 76 + dy, 6);
+    ctx.fillStyle = "#FFFFFF"; font(ctx, 110, 700); text(ctx, "SQUAD", X, 190 + dy);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, (sq.team.name || "").toUpperCase(), W - X - 40, 40, 700); text(ctx, (sq.team.name || "").toUpperCase(), X, 244 + dy);
+    const rest = sq.players.map((p, i) => [p, imgs[i]]).filter(([p]) => p !== cap).slice(0, H > 1500 ? 29 : 23), rs = 290 + dy, rh = Math.min(H > 1500 ? 90 : 70, (H - 60 - rs) / Math.max(1, rest.length));
+    rest.forEach(([p, im], i) => {
+      const y = rs + i * rh;
+      if (i % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,0.06)"; roundRect(ctx, X - 10, y, W - X - 20, rh - 4, 10); ctx.fill(); }
+      faceRing(ctx, im, p, T, X + rh * 0.42, y + (rh - 4) / 2, rh * 0.38);
+      ctx.fillStyle = T.acc; font(ctx, rh * 0.36, 700); text(ctx, p.no != null ? String(p.no) : "–", X + rh * 0.95 + 28, y + rh * 0.62, "center");
+      const nm = p.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - X - 230, rh * 0.42, 600); text(ctx, nm, X + rh * 0.95 + 64, y + rh * 0.62);
+      const tg = [p.wk ? "WK" : "", SQ_ROLE[p.role] && p.role !== "keeper" ? SQ_ROLE[p.role] : ""].filter(Boolean);
+      let e = W - 40; for (const c of tg) { const w = pill(ctx, c, e, y + rh / 2 - 2, rh * 0.42, c === "WK" ? T.acc : "rgba(255,255,255,0.15)", c === "WK" ? "#0B0D12" : "#FFFFFF", true); e -= w + 6; }
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  function drawSquadNumbers(ctx, W, H, th, d) {
+    const T = squadTones(d), ps = squadList(d, H), imgs = d.images.players || []; squadBg(ctx, W, H, T); squadHead(ctx, W, d, T, 40 + (H - 1350) * 0.15);
+    const n = ps.length, cols = n > 18 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 0.9, (H - 50 - y0 - gap * (rows - 1)) / rows);
+    ps.forEach((p, i) => {
+      const X = 30 + (i % cols) * (tw + gap), Y = y0 + Math.floor(i / cols) * (th2 + gap), sk = th2 * 0.18;
+      slant(ctx, X, Y, tw, th2, sk); ctx.fillStyle = p.cap ? rgba(T.base, 0.9) : "rgba(255,255,255,0.06)"; ctx.fill();
+      ctx.strokeStyle = p.cap ? T.acc : rgba(T.hi, 0.7); ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = p.cap ? "#FFFFFF" : T.hi; font(ctx, th2 * 0.5, 700); text(ctx, p.no != null ? String(p.no) : "–", X + sk * 0.6 + 14, Y + th2 * 0.5);
+      faceRing(ctx, imgs[i], p, T, X + tw - th2 * 0.3 - 10, Y + th2 * 0.32, th2 * 0.24);
+      const nm = p.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, tw - sk - 30, th2 * 0.2, 700); text(ctx, nm, X + 14, Y + th2 * 0.76);
+      const tg = p.cap ? "CAPTAIN" : [p.wk ? "WK" : "", SQ_ROLE[p.role] && p.role !== "keeper" ? SQ_ROLE[p.role] : ""].filter(Boolean).join(" · ");
+      ctx.fillStyle = p.cap ? "#FFFFFF" : T.acc; font(ctx, th2 * 0.11, 700, BODY); spaced(ctx, tg, X + 8, Y + th2 * 0.92, 3);
+    });
+    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22); }
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1744,12 +1850,13 @@
     const u = d.urls || {};
     // Sponsors: d.sponsors [{name, url}], or the older single d.sponsor with urls.sponsor.
     if (!d.sponsors) d.sponsors = d.sponsor && (u.sponsor || d.sponsor.name) ? [{ name: d.sponsor.name || "", url: u.sponsor || "" }] : [];
-    const [tournament, playerImg, sponsors, teams, caps] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg)), Promise.all((u.caps || []).map(loadImg))]);
-    d.images = { tournament, player: playerImg, sponsors, teams, caps };
+    const [tournament, playerImg, sponsors, teams, caps, players] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg)), Promise.all((u.caps || []).map(loadImg)), Promise.all((u.players || []).map(loadImg))]);
+    d.images = { tournament, player: playerImg, sponsors, teams, caps, players };
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "squad") { ({ R: drawSquadRoster, C: drawSquadCaptain, N: drawSquadNumbers })[style](ctx, W, H, th, d); return cv; }
     if (kind === "lineup") { ({ D: drawXiDuel, P: drawXiSplit, S: drawXiSheet })[style](ctx, W, H, th, d); return cv; }
     if (kind === "groups") { ({ B: drawGroupBands, D: drawGroupDraw, S: drawGroupShowcase })[style](ctx, W, H, th, d); return cv; }
     if (kind === "schedule") { (style === "W" ? drawShowdown : drawTimeline)(ctx, W, H, th, d); return cv; }
