@@ -231,18 +231,19 @@
       <button class="btn btn-primary btn-big" data-act="openers">Start innings</button></div>`;
   }
 
-  // One calm panel: runs on top, extras under them, then Undo, OUT and More under the thumb.
-  // Colour only marks what matters (boundaries, extras, the wicket), not every key.
+  // Big separate tiles: runs on top (4 and 6 in green), extras under them, then Undo, OUT and More
+  // under the thumb. The run tiles grow to fill a tall screen.
   function keypad() {
-    const sub = { 0: "dot", 4: "four", 6: "six" };
-    const k = (n) => `<button class="key key-run ${n === 4 || n === 6 ? "key-bnd" : ""}" data-act="run" data-n="${n}">${n}${sub[n] ? `<small>${sub[n]}</small>` : ""}</button>`;
+    const k = (n) => `<button class="key key-run ${n === 4 || n === 6 ? "key-bnd" : ""}" data-act="run" data-n="${n}">${n}</button>`;
     const x = (kind, label) => `<button class="key key-x" data-act="sheet" data-k="${kind}">${label}</button>`;
-    return `<div class="keypad pad">
-      ${[0, 1, 2, 3, 4, 6].map(k).join("")}
-      ${x("wd", "Wide")}${x("nb", "No ball")}${x("b", "Bye")}${x("lb", "Leg bye")}
-      <button class="key key-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}><span aria-hidden="true">↶</span>Undo</button>
-      <button class="key key-out" data-act="sheet" data-k="out">Out</button>
-      <button class="key key-tool" data-act="sheet" data-k="more"><span aria-hidden="true">⋯</span>More</button>
+    return `<div class="keypad kp">
+      <div class="kp-runs">${[0, 1, 2, 3, 4, 6].map(k).join("")}</div>
+      <div class="kp-x">${x("wd", "Wide")}${x("nb", "No ball")}${x("b", "Bye")}${x("lb", "Leg bye")}</div>
+      <div class="kp-bar">
+        <button class="key key-tool" data-act="undo" ${rec.events.length ? "" : "disabled"}><span aria-hidden="true">↶</span> Undo</button>
+        <button class="key key-out" data-act="sheet" data-k="out">Out</button>
+        <button class="key key-tool" data-act="sheet" data-k="more">More</button>
+      </div>
     </div>`;
   }
 

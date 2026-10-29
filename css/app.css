@@ -449,30 +449,25 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .score-body .btn-pick { min-height: 44px; padding: 8px 12px; }
 .score-body .pick-grid { gap: 6px; }
 
-/* Scoring pad: one panel split by hairlines, colour only on boundaries, extras and OUT. */
-.pad { grid-template-columns: repeat(12, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
-.score-body .pad { grid-auto-rows: auto; grid-template-rows: minmax(60px, 1.45fr) minmax(46px, 1fr) minmax(52px, 1fr); gap: 1px; max-height: 400px; }
-.pad .key { min-height: 0; border: 0; border-radius: 0; background: var(--surface); color: var(--ink); transition: background-color 0.08s; }
-.pad .key:active { transform: none; background: var(--paper); }
-.pad .key-run { grid-column: span 2; font-size: 1.85rem; position: relative; }
-.pad .key-run small { position: absolute; left: 0; right: 0; bottom: 12%; font-size: 0.62rem; letter-spacing: 0.08em; }
-.pad .key-bnd { background: var(--surface); color: var(--turf); }
-.pad .key-bnd small { color: var(--turf); opacity: 0.8; }
-.pad .key-x { grid-column: span 3; background: var(--surface); color: var(--amber); font-size: 0.92rem; font-weight: 600; }
-.pad .key-tool { grid-column: span 3; flex-direction: row; gap: 6px; font-size: 0.92rem; font-weight: 600; color: var(--muted); }
-.pad .key-tool span { font-size: 1.15rem; line-height: 1; }
-.pad .key-tool:disabled { opacity: 0.4; }
-.pad .key-out { grid-column: span 6; background: var(--out, var(--ball)); color: #fff; font-size: 1.35rem; letter-spacing: 0.12em; }
-.pad .key-out:active { background: var(--out, var(--ball)); filter: brightness(0.9); }
-.score-body .pad .key-run { font-size: clamp(1.6rem, 4.2dvh, 2.1rem); }
-.score-body .pad .key-x, .score-body .pad .key-tool { font-size: 0.92rem; }
-.score-body .pad .key-out { font-size: 1.3rem; }
+/* Scoring keypad: separate tiles; run tiles stretch to fill spare height. */
+.score-body .kp { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; max-height: none; }
+.kp-runs { flex: 1 1 auto; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 8px; min-height: 116px; max-height: 240px; }
+.kp-x { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.kp-bar { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 8px; }
+.kp .key { min-height: 0; border: 0; border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.18); }
+.kp .key:active { transform: scale(0.97); filter: brightness(0.95); }
+.score-body .kp .key-run { font-family: var(--body); font-size: 1.75rem; font-weight: 700; }
+.kp .key-bnd { background: var(--turf); color: var(--on-turf); box-shadow: none; }
+.score-body .kp .key-x { height: 50px; font-size: 0.9rem; font-weight: 600; color: var(--amber); white-space: nowrap; line-height: 1.1; }
+.kp .key-tool { height: 56px; flex-direction: row; gap: 4px; font-size: 0.95rem; font-weight: 600; color: var(--muted); }
+.kp .key-tool:disabled { opacity: 0.45; }
+.score-body .kp .key-out { height: 56px; grid-column: auto; background: var(--out, var(--ball)); color: #fff; box-shadow: none; font-family: var(--body); font-size: 1.1rem; font-weight: 800; letter-spacing: 0.1em; }
 .swap-btn { margin-left: auto; flex: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 4px 12px; min-height: 34px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 .swap-btn:active { background: var(--paper); }
 @media (max-height: 700px) {
-  .score-body .pad { grid-template-rows: minmax(50px, 1.3fr) minmax(40px, 1fr) minmax(44px, 1fr); }
-  .score-body .pad .key { min-height: 0; }
-  .score-body .pad .key-run small { display: block; }
+  .kp-runs { min-height: 100px; }
+  .score-body .kp .key-x { height: 42px; }
+  .kp .key-tool, .score-body .kp .key-out { height: 48px; }
 }
 @media (max-width: 380px) { .score-body .over-label { display: none; } }
 
