@@ -485,7 +485,7 @@
     await draw();
   }
 
-  const styleFor = (kind) => (C.stylesFor(kind).some(([k]) => k === V.style) ? V.style : "A");
+  const styleFor = (kind) => (C.stylesFor(kind).some(([k]) => k === V.style) ? V.style : C.stylesFor(kind)[0][0]);
 
   async function draw() {
     const c = V.card;
