@@ -149,6 +149,7 @@ do $$ begin
 exception when insufficient_privilege then null;
 end $$;
 select pg_temp.blocked($q$insert into public.notifications (user_id, kind, title, dedupe) values ('00000000-0000-0000-0000-00000000000a', 'result', 'Spam', 'x')$q$);
+
 update public.notifications set read_at = now();
 do $$ begin
   if (select count(*) from public.notifications where read_at is null) <> 0 then raise exception 'player cannot mark an alert read'; end if;
@@ -157,6 +158,16 @@ select pg_temp.act('00000000-0000-0000-0000-00000000000a');
 do $$ begin
   if (select count(*) from public.notifications where read_at is null) <> 1 then raise exception 'organiser alert missing or touched by someone else'; end if;
 end $$;
+
+-- Media managers (user c holds the media role from above) get result alerts too, but can't score.
+select pg_temp.act('00000000-0000-0000-0000-00000000000b');
+select public.notify_card('40000000-0000-0000-0000-000000000001', 'result', 'Result card ready', '', null, '{"key":"result"}');
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if not exists (select 1 from public.notifications where kind = 'result') then raise exception 'media manager did not get the result alert'; end if;
+end $$;
+select pg_temp.blocked($q$insert into public.match_events (match_id, seq, event) values ('40000000-0000-0000-0000-000000000001', 999, '{"t":"run"}')$q$);
+select pg_temp.blocked($q$update public.tournaments set name = 'Media Cup' where id = '10000000-0000-0000-0000-000000000001'$q$);
 
 -- Deleting an account. A solo organiser's tournament goes with them; a scorer's balls in
 -- someone else's tournament stay.

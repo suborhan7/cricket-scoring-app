@@ -32,3 +32,20 @@ test("table caption lists teams in order", () => {
   const cap = C.caption("table", { tournament: tour, table: { group: "A", rows: [{ name: "DT", pts: 4, nrr: "+1.000" }, { name: "CK", pts: 2, nrr: "−1.000" }] } });
   assert.equal(cap, "Winter Cup 2026 points table, Group A:\n1. DT 4 pts (NRR +1.000)\n2. CK 2 pts (NRR −1.000)\n\n#WC26 #cricket");
 });
+
+const DT = { name: "Dhaka Tigers", short: "DT" }, CK = { name: "Chattogram Kings", short: "CK" };
+test("engagement card captions", () => {
+  const sched = C.caption("schedule", { tournament: tour, schedule: { title: "Fixtures", rows: [
+    { date: "Fri 30 Oct", teams: [DT, CK], time: "3:30 PM", venue: "Mirpur" },
+    { date: "Tue 27 Oct", teams: [CK, DT], result: "Dhaka Tigers won by 5 wickets", venue: "Mirpur" },
+  ] } });
+  assert.match(sched, /Fri 30 Oct: Dhaka Tigers v Chattogram Kings, 3:30 PM at Mirpur\nTue 27 Oct: Chattogram Kings v Dhaka Tigers \(Dhaka Tigers won by 5 wickets\)\n/);
+  const xi = C.caption("lineup", { tournament: tour, lineup: { toss: "DT won the toss", teams: [
+    Object.assign({ players: [{ name: "Rakib", cap: true }, { name: "Jaker", wk: true }] }, DT), Object.assign({ players: [{ name: "Soumya" }] }, CK)] } });
+  assert.match(xi, /Dhaka Tigers: Rakib \(c\), Jaker \(wk\)\n\nChattogram Kings: Soumya\n\n#WC26 #DTvCK #cricket$/);
+  const lead = C.caption("leaders", { tournament: tour, leaders: { title: "Most runs", unit: "Runs", rows: [{ name: "Rakib", team: DT, value: 312 }] } });
+  assert.match(lead, /most runs:\n1\. Rakib \(DT\) 312 runs/);
+  assert.match(C.caption("champions", { tournament: tour, champions: { team: DT, result: "Beat Chattogram Kings in the final" } }), /^Dhaka Tigers are the Winter Cup 2026 champions! Beat Chattogram Kings in the final\.\n\n#WC26 #DT #champions #cricket$/);
+  assert.match(C.caption("target", { tournament: tour, target: { batting: DT, chasing: CK, runs: 164, wickets: 7, overs: "20 ov", target: 165, balls: 120 } }), /Chattogram Kings need 165 runs from 120 balls/);
+  assert.match(C.caption("potm", { tournament: tour, player: { name: "Rakib", team: "Dhaka Tigers" }, potm: { figures: "54 (31) · 2/18 in 4 ov", result: "Dhaka Tigers won by 5 wickets" } }), /^Player of the match: Rakib \(Dhaka Tigers\)! 54 \(31\) · 2\/18 in 4 ov\.\nDhaka Tigers won by 5 wickets/);
+});

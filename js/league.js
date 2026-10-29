@@ -488,8 +488,8 @@
 
   // ---------- People: organisers, scorers and media ----------
 
-  const ROLE_TEXT = { organiser: "Organiser", scorer: "Scorer", media: "Media" };
-  const ROLE_HELP = { organiser: "can change everything", scorer: "can score and fix balls", media: "can make and share cards" };
+  const ROLE_TEXT = { organiser: "Organiser", scorer: "Scorer", media: "Media manager" };
+  const ROLE_HELP = { organiser: "can change everything", scorer: "can score and fix balls", media: "makes and shares cards, gets card alerts, can't score or edit" };
 
   async function loadPeople() {
     const T = L.tour;
@@ -515,6 +515,7 @@
       <p class="muted small">They sign up in the app first, then you add them with the email they used.</p>
       ${field("Their email", `<input id="person-email" data-f="people.email" type="email" inputmode="email" autocomplete="off" value="${esc(f.email || "")}">`)}
       <div class="chips">${Object.keys(ROLE_TEXT).map((r) => `<button class="chip ${f.role === r ? "on" : ""}" data-act="person-role" data-r="${r}">${ROLE_TEXT[r]}</button>`).join("")}</div>
+      <p class="muted small">${ROLE_TEXT[f.role]}: ${ROLE_HELP[f.role]}.</p>
       ${status(f)}
       <button class="btn btn-primary" data-act="person-add" ${f.busy ? "disabled" : ""}>${f.busy ? "Adding…" : `Add as ${ROLE_TEXT[f.role].toLowerCase()}`}</button></div>`;
   }
