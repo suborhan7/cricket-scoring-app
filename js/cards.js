@@ -2074,9 +2074,11 @@
     ctx.fillStyle = "rgba(255,255,255,0.07)"; slant(ctx, 40, y, W - 80, h, sk); ctx.fill();
     ctx.fillStyle = T.base; slant(ctx, 40, y, 96, h, sk); ctx.fill();
     ctx.fillStyle = "#FFFFFF"; font(ctx, h * 0.5, 700); text(ctx, String(i + 1), 86, cy + h * 0.18, "center");
-    const fr = h * 0.38; faceRing(ctx, leadImg(d, i), r, T, 150 + fr, cy, fr);
-    logo(ctx, d.images.teams[i], r.team, 150 + fr * 2 + 34, cy, h * 0.42);
-    const nx = 150 + fr * 2 + 70, nm = r.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - nx - 200, Math.min(38, h * 0.36), 700); text(ctx, nm, nx, cy + (r.sub ? -2 : 12));
+    // No photo: the team logo stands in for the face.
+    const fr = h * 0.38, img = leadImg(d, i);
+    if (img) { faceRing(ctx, img, r, T, 150 + fr, cy, fr); logo(ctx, d.images.teams[i], r.team, 150 + fr * 2 + 34, cy, h * 0.42); }
+    else logo(ctx, d.images.teams[i], r.team, 150 + fr, cy, fr * 2);
+    const nx = img ? 150 + fr * 2 + 70 : 150 + fr * 2 + 24, nm = r.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - nx - 200, Math.min(38, h * 0.36), 700); text(ctx, nm, nx, cy + (r.sub ? -2 : 12));
     if (r.sub) { ctx.fillStyle = "rgba(255,255,255,0.65)"; fit(ctx, `${r.team.short} · ${r.sub}`, W - nx - 200, Math.min(20, h * 0.2), 500, BODY, 11); text(ctx, `${r.team.short} · ${r.sub}`, nx, cy + h * 0.3); }
     ctx.fillStyle = acc; font(ctx, Math.min(60, h * 0.56), 700); text(ctx, String(r.value), W - 70, cy + Math.min(60, h * 0.56) * 0.36, "right");
   }
@@ -2141,13 +2143,13 @@
       ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(40, y, W - 80, h);
       const bw = (W - 80) * (0.35 + 0.65 * frac), gb = ctx.createLinearGradient(40, 0, 40 + bw, 0); gb.addColorStop(0, rgba(T.base, 0.95)); gb.addColorStop(1, rgba(mix(T.base, T.deep, 0.5), i ? 0.6 : 0.85)); ctx.fillStyle = gb; ctx.fillRect(40, y, bw, h);
       ctx.fillStyle = i ? "rgba(255,255,255,0.5)" : acc; ctx.fillRect(40 + bw - 4, y, 4, h);
-      if (img) bust(ctx, img, 40 + h * 0.75, y + h, h * 1.08); else { const fr = h * 0.36; faceRing(ctx, null, r, T, 40 + h * 0.75, cy, fr); }
+      if (img) bust(ctx, img, 40 + h * 0.75, y + h, h * 1.08); else logo(ctx, d.images.teams[i], r.team, 40 + h * 0.75, cy, h * 0.66);
       ctx.restore();
       ctx.fillStyle = "rgba(255,255,255,0.95)"; font(ctx, h * (i ? 0.34 : 0.26), 700); text(ctx, String(i + 1), 60, y + h * (i ? 0.42 : 0.34), "left");
       const nx = 40 + h * 1.5, nm = r.name.toUpperCase();
       ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 8; fit(ctx, nm, W - nx - (i ? 250 : 380), i ? Math.min(40, h * 0.34) : 58, 700); text(ctx, nm, nx, y + h * 0.66); ctx.shadowBlur = 0;
       const sub = [r.team.short, r.sub].filter(Boolean).join(" · "); ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, sub, W - nx - 240, i ? Math.min(19, h * 0.17) : 22, 500, BODY, 11); text(ctx, sub, nx, y + h * 0.88);
-      logo(ctx, d.images.teams[i], r.team, W - (i ? 200 : 320), cy, h * (i ? 0.42 : 0.4));
+      if (img) logo(ctx, d.images.teams[i], r.team, W - (i ? 200 : 320), cy, h * (i ? 0.42 : 0.4));
       ctx.fillStyle = i ? "#FFFFFF" : acc; font(ctx, i ? Math.min(64, h * 0.5) : Math.min(120, h * 0.6), 700); text(ctx, String(r.value), W - 66, cy + (i ? Math.min(64, h * 0.5) : Math.min(120, h * 0.6)) * 0.36, "right");
       if (!i) { ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, 20, 700, BODY); spaced(ctx, (ld.unit || "").toUpperCase(), W - 66, cy + h * 0.38, 4, "right"); }
     });
