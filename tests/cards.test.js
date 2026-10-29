@@ -55,6 +55,18 @@ test("milestone cards have Spotlight and Split; other player cards Broadcast and
   assert.deepEqual(C.stylesFor("award").map(([k]) => k), ["A", "B"]);
   assert.deepEqual(C.stylesFor("schedule").map(([k]) => k), ["A", "B", "C"]);
   assert.deepEqual(C.stylesFor("milestone"), [["S", "Spotlight"], ["P", "Split"]]);
+  assert.deepEqual(C.stylesFor("result"), [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]]);
+  assert.deepEqual(C.stylesFor("batperf"), C.stylesFor("milestone"));
+  assert.deepEqual(C.stylesFor("bowlperf"), C.stylesFor("milestone"));
+  assert.deepEqual(C.stylesFor("allround"), C.stylesFor("potm"));
+});
+
+test("captions for performance cards", () => {
+  const tour = { name: "Winter Cup 2026", short: "WC26" }, player = { name: "Rakib", team: "Dhaka Tigers", teamShort: "DT" };
+  const base = { tournament: tour, player, opponent: "Chattogram Kings", opponentShort: "CK" };
+  assert.match(C.caption("batperf", Object.assign({ milestone: { runs: 34, notOut: true, balls: 21, fours: 3, sixes: 2 } }, base)), /^Rakib made 34\* off 21 balls for Dhaka Tigers against Chattogram Kings, with 3 fours and 2 sixes\.\n\n#WC26 #DTvCK #cricket$/);
+  assert.match(C.caption("bowlperf", Object.assign({ milestone: { wickets: 2, runs: 18, overs: "4" } }, base)), /^Rakib took 2 for 18 in 4 overs/);
+  assert.match(C.caption("allround", Object.assign({ potm: { figures: "34* (21) & 2/18" } }, base)), /^All-round show from Rakib for Dhaka Tigers against Chattogram Kings: 34\* \(21\) & 2\/18\./);
 });
 
 test("captions for groups, runners-up and tournament awards", () => {
