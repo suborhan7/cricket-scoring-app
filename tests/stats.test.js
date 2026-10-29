@@ -96,3 +96,17 @@ test("player of the match points", () => {
   assert.equal(catcher.pts, 8);
   assert.equal(catcher.line, "1 catch");
 });
+
+test("player of the tournament adds up batting and bowling points", () => {
+  const sm = (bat, bowl) => ({ v: 1, maxBalls: 60, bpo: 6, innings: [], bat, bowl });
+  const ms = [
+    { id: "m1", team1_id: "A", team2_id: "B", status: "done", summary: sm(
+      [{ id: "p1", name: "One", team: 0, runs: 52, balls: 30, fours: 4, sixes: 2, out: true }],
+      [{ id: "p2", name: "Two", team: 1, balls: 24, runs: 20, wickets: 3 }, { id: "p1", name: "One", team: 0, balls: 6, runs: 10, wickets: 1 }]) },
+    { id: "m2", team1_id: "A", team2_id: "B", status: "live", summary: sm([{ id: "p2", name: "Two", team: 1, runs: 90, balls: 40, fours: 9, sixes: 5, out: false }], []) },
+  ];
+  const list = St.tournamentMvp(ms);
+  // One: 52 + 4 + 4 + 16 + 20 = 96; Two: 60 + 8 = 68 (the live match does not count).
+  assert.deepEqual(list.map((x) => [x.id, x.pts, x.played]), [["p1", 96, 1], ["p2", 68, 1]]);
+  assert.equal(list[0].teamId, "A");
+});
