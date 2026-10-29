@@ -7,7 +7,8 @@
   const sb = lg && lg.sb, L = lg ? lg.L : {};
   const url = (bucket, path) => (lg && path ? lg.publicUrl(bucket, path) : "");
 
-  const V = { card: null, list: null }; // the card being previewed, and the open list of cards
+  // The card being previewed, the open list of cards, and the look last picked (A, B or C).
+  const V = { card: null, list: null, style: "A" };
 
   // ---------- Building card data ----------
 
@@ -44,12 +45,22 @@
     return Object.assign({ tournament: ctx.ti.info, sponsor: ctx.ti.sponsor, urls: { tournament: ctx.ti.logo, sponsor: ctx.ti.sponsor.logo } }, extra);
   }
 
-  async function playerPhoto(rec, team, p) {
-    const ids = rec.match.cloud && rec.match.cloud.playerIds;
-    const id = ids && ids[team] && ids[team][p];
-    if (!id || !sb) return "";
-    const { data } = await sb.from("players").select("photo_path").eq("id", id).maybeSingle();
-    return data && data.photo_path ? url("photos", data.photo_path) : "";
+  // A player's photo and shirt number, by database id.
+  async function playerExtras(id) {
+    if (!id || !sb) return { photo: "", no: null };
+    const { data } = await sb.from("players").select("photo_path, jersey_no").eq("id", id).maybeSingle();
+    return { photo: data && data.photo_path ? url("photos", data.photo_path) : "", no: data ? data.jersey_no : null };
+  }
+
+  // The player on a player card, in their team's colours, with photo and shirt number.
+  async function heroPlayer(rec, ctx, team, p, d) {
+    const ids = rec.match.cloud && rec.match.cloud.playerIds, tm = ctx.teams[team];
+    const x = await playerExtras(ids && ids[team] && ids[team][p]);
+    const name = rec.match.teams[team].players[p];
+    d.player = { name, initials: initialsOf(name), team: tm.name, teamShort: tm.short, c1: tm.c1, c2: tm.c2, no: x.no };
+    d.urls.player = x.photo;
+    d.urls.teams = [tm.logo];
+    return d;
   }
 
   // A milestone card, with the figures exactly as they stood on the ball it came up.
@@ -70,11 +81,10 @@
     const other = 1 - ms.team;
     const d = base(ctx, {
       milestone: m,
-      player: { name, initials: initialsOf(name), team: match.teams[ms.team].name, teamShort: match.teams[ms.team].short },
       opponent: match.teams[other].name, opponentShort: match.teams[other].short,
       matchLabel: [matchLabel(ctx.m), `${match.teams[ms.team].short} v ${match.teams[other].short}`].filter(Boolean).join(" · "),
     });
-    d.urls.player = await playerPhoto(rec, ms.team, ms.player);
+    await heroPlayer(rec, ctx, ms.team, ms.player, d);
     return { kind: "milestone", data: d, title: `${C.MILESTONE[ms.kind].word[0] + C.MILESTONE[ms.kind].word.slice(1).toLowerCase()}: ${name}` };
   }
 
@@ -139,37 +149,60 @@
   const logoOf = (t) => url("logos", t.logo_path);
   const teamInfo = (t) => ({ name: t.name, short: t.short_name, c1: t.primary_color, c2: t.secondary_color });
 
-  // Fixture rows: a calendar date, the teams, and the time and venue or the result.
-  function scheduleRow(m) {
+  const groupOf = (T, id) => { const t = T.teams.find((x) => x.id === id); return (t && t.group) || ""; };
+
+  // A fixture row: the teams, the time or the result and score, and the group and ground.
+  function scheduleRow(T, m) {
     const a = lg.teamById(m.team1_id), b = lg.teamById(m.team2_id), dt = m.starts_at ? new Date(m.starts_at) : null;
     const played = m.status === "done" || m.status === "abandoned";
+    const g = m.stage === "group" && T.t.kind !== "series" ? groupOf(T, m.team1_id) : "";
+    const inn = played && m.summary && m.summary.innings;
+    const score = inn && inn.length ? [0, 1].map((k) => { const x = inn.find((i) => i.team === k); return x ? `${x.runs}/${x.wickets}` : "–"; }).join(" · ") : "";
     return {
-      day: dt ? String(dt.getDate()).padStart(2, "0") : "", mon: dt ? dt.toLocaleDateString("en-GB", { month: "short" }).toUpperCase() : "",
-      wd: dt ? dt.toLocaleDateString("en-GB", { weekday: "short" }).toUpperCase() : "",
-      date: dt ? dt.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : "",
       time: dt ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "",
-      venue: m.venue || "", label: matchLabel(m), live: m.status === "live",
+      tag: [g ? `Grp ${g}` : m.stage && m.stage !== "group" ? STAGE[m.stage] : m.match_no ? `Match ${m.match_no}` : "", m.venue || ""].filter(Boolean).join(" · ").toUpperCase(),
+      live: m.status === "live", score,
       result: played ? m.result_text || (m.status === "abandoned" ? "Abandoned" : "Result") : "",
       winner: played && m.winner_team_id ? (m.winner_team_id === m.team1_id ? 0 : 1) : null,
       teams: [teamInfo(a), teamInfo(b)], logos: [logoOf(a), logoOf(b)],
     };
   }
 
-  const PAGE = 6;
-  // Fixture lists come in pages of six, so each card stays readable.
-  function schedulePages(T, upcoming) {
-    const ms = T.matches.filter((m) => !upcoming || m.status === "scheduled" || m.status === "live");
-    const pages = [];
-    for (let i = 0; i < ms.length; i += PAGE) pages.push(ms.slice(i, i + PAGE));
-    return pages.map((page, n) => ({ page, n, of: pages.length, upcoming }));
+  const PAGE = 8;
+  const dayKey = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const dayText = (iso) => iso ? new Date(iso).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "Date to be announced";
+
+  // One card per match day, up to eight matches; a busier day goes on to a second card.
+  function matchDays(T) {
+    const ms = T.matches.slice().sort((x, y) => String(x.starts_at || "9").localeCompare(String(y.starts_at || "9")));
+    const days = new Map();
+    for (const m of ms) { const k = dayKey(m.starts_at); if (!days.has(k)) days.set(k, []); days.get(k).push(m); }
+    const out = [];
+    for (const [key, list] of days) {
+      const of = Math.ceil(list.length / PAGE);
+      for (let n = 0; n < of; n++) out.push({ key, page: list.slice(n * PAGE, (n + 1) * PAGE), n, of, when: list[0].starts_at, done: list.every((m) => m.status === "done" || m.status === "abandoned") });
+    }
+    return out;
   }
 
   function scheduleCard(T, p) {
-    const ti = tournamentInfo(T.t), rows = p.page.map(scheduleRow);
-    const title = p.upcoming ? "Fixtures" : "Fixtures & results";
-    const d = base({ ti }, { schedule: { title, label: p.upcoming ? "Match schedule" : "Full schedule", sub: p.of > 1 ? `Page ${p.n + 1} of ${p.of}` : T.t.kind === "series" ? "Series" : "", rows } });
+    const ti = tournamentInfo(T.t), rows = p.page.map((m) => scheduleRow(T, m));
+    const stages = [...new Set(p.page.map((m) => STAGE[m.stage] || ""))].filter(Boolean);
+    const sub = [stages.length === 1 ? stages[0] : "", p.of > 1 ? `Part ${p.n + 1} of ${p.of}` : ""].filter(Boolean).join(" · ");
+    const kicker = dayText(p.when).replace(",", " ·").toUpperCase();
+    const d = base({ ti }, { schedule: { title: p.done ? "Results" : "Match day", kicker, sub, rows } });
     d.urls.teams = [].concat(...rows.map((r) => r.logos));
-    return { kind: "schedule", data: d, title: p.of > 1 ? `${title} ${p.n + 1}/${p.of}` : title };
+    return { kind: "schedule", data: d, title: `${p.done ? "Results" : "Match day"}, ${dayText(p.when)}${p.of > 1 ? ` (${p.n + 1}/${p.of})` : ""}` };
+  }
+
+  // The groups, each with its teams.
+  function groupNames(T) { return [...new Set(T.teams.map((t) => t.group || ""))].filter(Boolean).sort(); }
+  function groupsCard(T) {
+    const ti = tournamentInfo(T.t), names = groupNames(T);
+    const groups = names.map((g) => ({ name: `Group ${g}`, teams: T.teams.filter((t) => t.group === g).map((t) => lg.teamById(t.id)) }));
+    const d = base({ ti }, { groups: { kicker: "Group stage", sub: `${T.teams.length} teams · ${names.length} groups`, groups: groups.map((g) => ({ name: g.name, teams: g.teams.map(teamInfo) })) } });
+    d.urls.teams = [].concat(...groups.map((g) => g.teams.map(logoOf)));
+    return { kind: "groups", data: d, title: "Groups" };
   }
 
   // Playing XIs of a match that has started: captain and keeper marked, toss on top.
@@ -227,16 +260,15 @@
     const field = x.catches + x.stumpings + x.runouts;
     if (field) tiles.push({ v: String(field), k: x.catches === field ? (field === 1 ? "Catch" : "Catches") : "Dismissals" });
     // Fill a short row with the rate that goes with the main figures.
-    if (tiles.length < 3 && x.balls >= 6) tiles.push({ v: ((x.runs * 100) / x.balls).toFixed(0), k: "Strike rate" });
-    if (tiles.length < 3 && x.bowled >= 6) tiles.push({ v: ((x.conceded * E.settings(match).ballsPerOver) / x.bowled).toFixed(1), k: "Economy" });
+    if (tiles.length < 4 && x.balls >= 6) tiles.push({ v: ((x.runs * 100) / x.balls).toFixed(0), k: "Strike rate" });
+    if (tiles.length < 4 && x.bowled >= 6) tiles.push({ v: ((x.conceded * E.settings(match).ballsPerOver) / x.bowled).toFixed(1), k: "Economy" });
     if (tiles.length < 2) tiles.push({ v: String(x.pts), k: "MVP points" });
     const team = match.teams[x.team], opp = match.teams[1 - x.team];
     const d = base(ctx, {
       matchLabel: [matchLabel(ctx.m), `${team.short} v ${opp.short}`].filter(Boolean).join(" · "),
-      player: { name: x.name, initials: initialsOf(x.name), team: team.name },
-      potm: { pts: x.pts, line: `${team.name} · ${s.result.text}`, figures: x.line, result: s.result.text, tiles },
+      potm: { pts: x.pts, line: s.result.text, figures: x.line, result: s.result.text, tiles },
     });
-    d.urls.player = await playerPhoto(rec, x.team, x.player);
+    await heroPlayer(rec, ctx, x.team, x.player, d);
     return { kind: "potm", data: d, title: `Player of the match: ${x.name}` };
   }
 
@@ -288,7 +320,8 @@
     const final = T.matches.find((m) => m.stage === "final" && m.status === "done" && m.winner_team_id);
     if (final) {
       const loser = lg.teamById(final.winner_team_id === final.team1_id ? final.team2_id : final.team1_id);
-      return { id: final.winner_team_id, result: `Beat ${loser.name} in the final`, at: final.starts_at };
+      const winner = lg.teamById(final.winner_team_id);
+      return { id: final.winner_team_id, result: `Beat ${loser.name} in the final`, at: final.starts_at, second: loser.id, secondResult: `Lost to ${winner.name} in the final` };
     }
     if (T.t.kind !== "series" || !T.matches.length || T.matches.some((m) => m.status === "scheduled" || m.status === "live")) return null;
     const wins = new Map();
@@ -298,14 +331,43 @@
     return { id: top[0], result: `Won the series ${top[1]}-${second ? second[1] : 0}`, at: T.matches[T.matches.length - 1].starts_at, series: true };
   }
 
-  function championsCard(T) {
+  // Champions, or with `silver` the runners-up of the final.
+  function championsCard(T, silver) {
     const c = champion(T);
-    if (!c) return null;
-    const t = lg.teamById(c.id), ti = tournamentInfo(T.t);
+    if (!c || (silver && !c.second)) return null;
+    const t = lg.teamById(silver ? c.second : c.id), ti = tournamentInfo(T.t);
     const year = String(new Date(c.at || T.t.starts_on || Date.now()).getFullYear());
-    const d = base({ ti }, { champions: { team: teamInfo(t), title: c.series ? "Series winners" : "Champions", result: c.result, season: T.t.name.includes(year) ? "" : year } });
+    const title = silver ? "Runners-up" : c.series ? "Series winners" : "Champions";
+    const d = base({ ti }, { champions: { team: teamInfo(t), title, silver: !!silver, result: silver ? c.secondResult : c.result, season: T.t.name.includes(year) ? "" : year } });
     d.urls.teams = [logoOf(t)];
-    return { kind: "champions", data: d, title: `${t.short_name}, champions` };
+    return { kind: "champions", data: d, title: `${t.short_name}, ${title.toLowerCase()}` };
+  }
+
+  // Tournament awards: player of the tournament (MVP points), best batter (runs), best bowler (wickets).
+  const AWARDS = {
+    mvp: { title: "Player of the tournament", k1: "PLAYER OF THE", k2: "TOURNAMENT", pick: (T) => St.tournamentMvp(T.matches)[0],
+      card: (x) => ({ badge: String(x.pts), badgeLabel: "MVP PTS", line: `${x.played} match${x.played === 1 ? "" : "es"}`,
+        stats: [[String(x.runs), "", "Runs"], [String(x.wickets), "", x.wickets === 1 ? "Wicket" : "Wickets"], [x.balls ? ((x.runs * 100) / x.balls).toFixed(0) : "–", "", "Strike rate"]] }) },
+    bat: { title: "Best batter", k1: "BEST", k2: "BATTER", big: "MOST RUNS", pick: (T) => St.leaders(T.matches).runs[0],
+      card: (x) => ({ badge: String(x.runs), badgeLabel: "RUNS", line: `${x.inns} innings`,
+        stats: [[x.sr.toFixed(1), "", "Strike rate"], [`${x.best}${x.bestOut ? "" : "*"}`, "", "Best"], [String(x.sixes), "", x.sixes === 1 ? "Six" : "Sixes"]] }) },
+    bowl: { title: "Best bowler", k1: "BEST", k2: "BOWLER", big: "WICKETS", pick: (T) => St.leaders(T.matches).wickets[0],
+      card: (x) => ({ badge: String(x.wickets), badgeLabel: x.wickets === 1 ? "WICKET" : "WICKETS", line: `${x.inns} match${x.inns === 1 ? "" : "es"}`,
+        stats: [[x.econ.toFixed(2), "", "Economy"], [`${x.bestW}/${x.bestR}`, "", "Best"], [x.overs, "", "Overs"]] }) },
+  };
+
+  async function awardCard(T, k) {
+    const A = AWARDS[k], x = A.pick(T);
+    if (!x || (k === "bowl" && !x.wickets)) { ui.toast("No numbers yet for this award."); return null; }
+    const t = lg.teamById(x.teamId), ti = tournamentInfo(T.t), more = await playerExtras(x.id);
+    const c = A.card(x);
+    const d = base({ ti }, {
+      matchLabel: "Tournament awards",
+      player: { name: x.name, initials: initialsOf(x.name), team: t.name, teamShort: t.short_name, c1: t.primary_color, c2: t.secondary_color, no: more.no },
+      award: Object.assign({ title: A.title, k1: A.k1, k2: A.k2, big: A.big }, c, { line: `${t.name} · ${c.line}` }),
+    });
+    d.urls.player = more.photo; d.urls.teams = [logoOf(t)];
+    return { kind: "award", data: d, title: `${A.title}: ${x.name}` };
   }
 
   // ---------- Card lists ----------
@@ -337,16 +399,18 @@
     ui.go("cards");
   }
 
-  // Tournament Cards tab: fixtures, match day, standings, leaders, squads, champions, then each match's cards.
+  // Tournament Cards tab: tournament-end cards, match days and groups, versus cards, standings, leaders, squads, then each match's cards.
   function tab(T) {
     const upcoming = T.matches.filter((m) => m.status === "scheduled" || m.status === "live");
     const played = T.matches.filter((m) => m.status === "done" || m.status === "live").reverse();
     const groups = [...new Set(T.teams.map((t) => t.group || ""))].sort();
     const row = (act, attrs, icon, label, sub) => `<li><button class="t-row" data-act="${act}" ${attrs}><span class="card-kind">${icon}</span><span class="t-text"><b>${esc(label)}</b><small>${esc(sub)}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
     const vsName = (m) => { const a = lg.teamById(m.team1_id), b = lg.teamById(m.team2_id); return `${a.short_name} v ${b.short_name}`; };
-    const pages = (up) => schedulePages(T, up).map((p) => row("card-schedule", `data-up="${up ? 1 : 0}" data-n="${p.n}"`, "▦",
-      `${up ? "Upcoming fixtures" : "Fixtures and results"}${p.of > 1 ? ` (${p.n + 1}/${p.of})` : ""}`, `${p.page.length} match${p.page.length === 1 ? "" : "es"} from ${whenText(p.page[0].starts_at)}`)).join("");
-    const schedule = pages(true) + (T.matches.some((m) => m.status === "done") ? pages(false) : "");
+    // Match days still to come first, then finished days, latest first.
+    const days = matchDays(T).map((p, i) => Object.assign(p, { i }));
+    const schedule = days.filter((p) => !p.done).concat(days.filter((p) => p.done).reverse()).map((p) => row("card-schedule", `data-i="${p.i}"`, "▦",
+      `${p.done ? "Results" : "Match day"}, ${dayText(p.when)}${p.of > 1 ? ` (${p.n + 1}/${p.of})` : ""}`, `${p.page.length} match${p.page.length === 1 ? "" : "es"}`)).join("")
+      + (groupNames(T).length > 1 ? row("card-groups", "", "▥", "Groups", `${groupNames(T).length} groups, ${T.teams.length} teams`) : "");
     const vs = upcoming.map((m) => row("card-vs", `data-id="${m.id}"`, "VS", vsName(m), whenText(m.starts_at))).join("")
       + upcoming.filter((m) => m.lineups).map((m) => row("card-lineup", `data-id="${m.id}"`, "XI", `Playing XIs, ${vsName(m)}`, "Line-ups and toss")).join("");
     const tables = T.teams.length >= 2 ? groups.map((g) => row("card-table", `data-g="${esc(g)}"`, "▤", g ? `Points table, group ${g}` : "Points table", "Current standings")).join("") : "";
@@ -354,12 +418,14 @@
     const leaders = hasDone ? Object.entries(LEADERS).map(([k, K]) => row("card-leaders", `data-k="${k}"`, "№1", K.title, "Top five, with the leader's photo")).join("") : "";
     const squads = T.teams.map((t) => row("card-squad", `data-id="${t.id}"`, "👥", `${t.name} squad`, `${t.count || 0} player${t.count === 1 ? "" : "s"}`)).join("");
     const champ = champion(T);
-    const champs = champ ? row("card-champions", "", "🏆", champ.series ? "Series winners" : "Champions", lg.teamById(champ.id).name) : "";
+    const champs = champ ? row("card-champions", "", "🏆", champ.series ? "Series winners" : "Champions", lg.teamById(champ.id).name)
+      + (champ.second ? row("card-champions", `data-silver="1"`, "🥈", "Runners-up", lg.teamById(champ.second).name) : "")
+      + Object.entries(AWARDS).map(([k, A]) => row("card-award", `data-k="${k}"`, "★", A.title, "With the player's photo")).join("") : "";
     const results = played.map((m) => row("card-match", `data-id="${m.id}"`, m.status === "live" ? "●" : "★", vsName(m), m.status === "live" ? "Live: line-ups, milestones, innings break" : m.result_text || "Result and milestones")).join("");
     const section = (title, body, empty) => `<h2 class="eyebrow">${title}</h2>${body ? `<ul class="t-list">${body}</ul>` : `<p class="muted">${empty}</p>`}`;
-    return (champs ? section("Champions", champs, "") : "")
-      + section("Schedule", schedule, "Add fixtures to make a schedule card.")
-      + section("Match day", vs, "Coming fixtures show up here.")
+    return (champs ? section("Tournament end", champs, "") : "")
+      + section("Match days", schedule, "Add fixtures to make match day cards.")
+      + section("Versus and playing XIs", vs, "Coming fixtures show up here.")
       + section("Standings", tables, "Add teams to make a points table card.")
       + section("Leaders", leaders, "Run, wicket and six leaders show up after the first finished match.")
       + section("Squads", squads, "Add teams to make squad cards.")
@@ -402,16 +468,18 @@
 
   async function show(card, back) {
     document.getElementById("toast").hidden = true;
-    V.card = Object.assign({ size: "post", back, loading: true, caption: C.caption(card.kind, card.data) }, card);
+    V.card = Object.assign({ size: "post", back, loading: true, caption: C.caption(card.kind, card.data), style: styleFor(card.kind) }, card);
     ui.go("cardview");
     await draw();
   }
+
+  const styleFor = (kind) => (C.stylesFor(kind).some(([k]) => k === V.style) ? V.style : "A");
 
   async function draw() {
     const c = V.card;
     c.loading = true; ui.render();
     try {
-      c.canvas = await C.render(c.kind, c.data, c.size);
+      c.canvas = await C.render(c.kind, c.data, c.size, c.style);
       c.preview = c.canvas.toDataURL("image/jpeg", 0.85);
       c.error = "";
     } catch (e) { c.error = "The card couldn't be drawn. " + ((e && e.message) || ""); }
@@ -422,9 +490,11 @@
   ui.screens.cardview = () => {
     const c = V.card;
     const chip = (v, label) => `<button class="chip ${c.size === v ? "on" : ""}" data-act="card-size" data-v="${v}">${label}</button>`;
+    const look = ([v, label]) => `<button class="chip ${c.style === v ? "on" : ""}" data-act="card-style" data-v="${v}">${label}</button>`;
     return `<header class="bar"><button class="icon-btn" data-act="cardview-back" aria-label="Back">←</button><h1>${esc(c.title || "Card")}</h1></header>
       <section class="wrap stack">
-        <div class="chips">${chip("post", "Post 4:5")}${chip("story", "Story 9:16")}</div>
+        <div class="chips" role="group" aria-label="Look">${C.stylesFor(c.kind).map(look).join("")}</div>
+        <div class="chips" role="group" aria-label="Size">${chip("post", "Post 4:5")}${chip("story", "Story 9:16")}</div>
         <div class="card-preview ${c.size}">${c.loading ? `<p class="muted">Drawing…</p>` : c.error ? `<p class="error">${esc(c.error)}</p>` : `<img src="${c.preview}" alt="${esc(c.title || "Card")} preview">`}</div>
         <div class="row-2"><button class="btn btn-primary btn-big" data-act="card-share" ${c.loading ? "disabled" : ""}>Share</button><button class="btn btn-big" data-act="card-save" ${c.loading ? "disabled" : ""}>Save image</button></div>
         <label class="field"><span>Caption</span><textarea id="card-caption" rows="6">${esc(c.caption)}</textarea></label>
@@ -433,7 +503,7 @@
   };
 
   const blobOf = (canvas) => new Promise((r) => canvas.toBlob(r, "image/png"));
-  const fileName = () => `${(V.card.title || "card").replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}-${V.card.size}.png`;
+  const fileName = () => `${(V.card.title || "card").replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}-${V.card.style.toLowerCase()}-${V.card.size}.png`;
   const currentCaption = () => { const el = document.getElementById("card-caption"); return el ? el.value : V.card.caption; };
 
   async function copyCaption(quiet) {
@@ -470,16 +540,19 @@
     },
     "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) show(versusCard(L.tour, m), "tour"); },
     "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
-    "card-schedule"(d) { const p = schedulePages(L.tour, d.up === "1")[+d.n]; if (p) show(scheduleCard(L.tour, p), "tour"); },
+    "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) show(scheduleCard(L.tour, p), "tour"); },
+    "card-groups"() { show(groupsCard(L.tour), "tour"); },
+    async "card-award"(d) { ui.toast("Making the card…"); const card = await awardCard(L.tour, d.k); if (card) show(card, "tour"); },
     async "card-lineup"(d) { const rec = await loadMatch(L.tour.matches.find((x) => x.id === d.id)); if (rec) show(await lineupCard(rec), "tour"); },
     async "card-squad"(d) { ui.toast("Loading squad…"); const card = await squadCard(L.tour, d.id); if (card) show(card, "tour"); },
     async "card-leaders"(d) { const card = await leadersCard(L.tour, d.k); if (card) show(card, "tour"); },
-    "card-champions"() { const card = championsCard(L.tour); if (card) show(card, "tour"); },
+    "card-champions"(d) { const card = championsCard(L.tour, d.silver === "1"); if (card) show(card, "tour"); },
     async "card-match"(d) {
       const m = L.tour.matches.find((x) => x.id === d.id);
       const rec = m && await loadMatch(m);
       if (rec) openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "tour");
     },
+    "card-style"(d) { if (V.card.style !== d.v) { V.card.caption = currentCaption(); V.card.style = V.style = d.v; draw(); } },
     "card-size"(d) { if (V.card.size !== d.v) { V.card.caption = currentCaption(); V.card.size = d.v; draw(); } },
     "cardview-back"() {
       V.card.caption = currentCaption();

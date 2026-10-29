@@ -49,3 +49,19 @@ test("engagement card captions", () => {
   assert.match(C.caption("target", { tournament: tour, target: { batting: DT, chasing: CK, runs: 164, wickets: 7, overs: "20 ov", target: 165, balls: 120 } }), /Chattogram Kings need 165 runs from 120 balls/);
   assert.match(C.caption("potm", { tournament: tour, player: { name: "Rakib", team: "Dhaka Tigers" }, potm: { figures: "54 (31) · 2/18 in 4 ov", result: "Dhaka Tigers won by 5 wickets" } }), /^Player of the match: Rakib \(Dhaka Tigers\)! 54 \(31\) · 2\/18 in 4 ov\.\nDhaka Tigers won by 5 wickets/);
 });
+
+test("player cards come in Broadcast and Poster only; other cards in all three looks", () => {
+  assert.deepEqual(C.stylesFor("potm").map(([k]) => k), ["A", "B"]);
+  assert.deepEqual(C.stylesFor("award").map(([k]) => k), ["A", "B"]);
+  assert.deepEqual(C.stylesFor("schedule").map(([k]) => k), ["A", "B", "C"]);
+});
+
+test("captions for groups, runners-up and tournament awards", () => {
+  const DT = { name: "Dhaka Tigers", short: "DT" }, CK = { name: "Chattogram Kings", short: "CK" };
+  assert.match(C.caption("groups", { tournament: tour, groups: { groups: [{ name: "Group A", teams: [DT] }, { name: "Group B", teams: [CK] }] } }), /Group A: Dhaka Tigers\nGroup B: Chattogram Kings/);
+  const ru = C.caption("champions", { tournament: tour, champions: { team: CK, silver: true, result: "Lost to Dhaka Tigers in the final" } });
+  assert.match(ru, /Chattogram Kings finish as runners-up/);
+  assert.match(ru, /#runnersup/);
+  const aw = C.caption("award", { tournament: tour, player: { name: "Rakib", team: "Dhaka Tigers" }, award: { title: "Best batter", stats: [["148.6", "", "Strike rate"]] } });
+  assert.match(aw, /^Best batter, Winter Cup 2026: Rakib \(Dhaka Tigers\)!\n148.6 strike rate/);
+});

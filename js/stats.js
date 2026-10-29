@@ -140,7 +140,37 @@
     })).sort((a, b) => b.pts - a.pts || b.runs - a.runs || b.wickets - a.wickets);
   }
 
-  const api = { summarize, pointsTable, leaders, mvp, MVP_RULES };
+  // Player of the tournament: the match MVP points that a summary can give (batting, and
+  // wickets with the three-for bonus; summaries keep no catches, maidens or dots), added up.
+  function tournamentMvp(matches) {
+    const all = new Map();
+    const get = (b, teamId) => {
+      const k = keyOf(b, teamId);
+      if (!all.has(k)) all.set(k, { key: k, id: b.id, name: b.name, teamId, matches: new Set(), pts: 0, runs: 0, balls: 0, sixes: 0, wickets: 0, conceded: 0, bowled: 0 });
+      return all.get(k);
+    };
+    for (const m of matches) {
+      const sm = m.summary;
+      if (m.status !== "done" || !sm) continue;
+      const teamIds = [m.team1_id, m.team2_id];
+      for (const b of sm.bat) {
+        if (!b.balls && !b.out) continue;
+        const x = get(b, teamIds[b.team]);
+        x.matches.add(m.id); x.runs += b.runs; x.balls += b.balls; x.sixes += b.sixes;
+        x.pts += b.runs + b.fours + 2 * b.sixes + (b.runs >= 50 ? 16 : b.runs >= 30 ? 8 : 0);
+      }
+      for (const b of sm.bowl) {
+        if (!b.balls) continue;
+        const x = get(b, teamIds[b.team]);
+        x.matches.add(m.id); x.wickets += b.wickets; x.conceded += b.runs; x.bowled += b.balls;
+        x.pts += 20 * b.wickets + (b.wickets >= 3 ? 8 : 0);
+      }
+    }
+    return [...all.values()].filter((x) => x.pts > 0).map((x) => Object.assign(x, { played: x.matches.size }))
+      .sort((a, b) => b.pts - a.pts || b.runs - a.runs || b.wickets - a.wickets);
+  }
+
+  const api = { summarize, pointsTable, leaders, mvp, tournamentMvp, MVP_RULES };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.CSA = Object.assign(root.CSA || {}, { stats: api });
 })(typeof window !== "undefined" ? window : globalThis);
