@@ -333,6 +333,7 @@
       ? `${match.teams[match.toss.winner].name} won the toss and chose to ${match.toss.decision === "bowl" ? "bowl" : "bat"}` : "";
     const d = base(ctx, { lineup: { teams, toss, stage: [matchLabel(ctx.m), `${match.teams[0].short} v ${match.teams[1].short}`].filter(Boolean).join(" · ") } });
     d.urls.teams = ctx.teams.map((t) => t.logo);
+    d.urls.caps = (await Promise.all(caps.map((id) => (id ? playerExtras(id) : null)))).map((x) => (x && x.photo) || "");
     return { kind: "lineup", data: d, title: `Playing XIs, ${match.teams[0].short} v ${match.teams[1].short}` };
   }
 

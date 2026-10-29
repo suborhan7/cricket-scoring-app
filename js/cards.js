@@ -22,10 +22,11 @@
   const RESULT_STYLES = [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]];
   const SCHEDULE_STYLES = [["T", "Timeline"], ["W", "Showdown"]];
   const GROUP_STYLES = [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]];
+  const LINEUP_STYLES = [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1616,6 +1617,123 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Playing XI: Duel, Split and Sheet ----------
+
+  // A rounded tag such as C or WK; returns its width. `right` anchors it by its right edge.
+  function pill(ctx, t, x, y, h, fill, ink, right) {
+    font(ctx, h * 0.6, 700, BODY); const w = ctx.measureText(t).width + h * 0.7, x0 = right ? x - w : x;
+    ctx.fillStyle = fill; roundRect(ctx, x0, y - h / 2, w, h, h / 2); ctx.fill(); ctx.fillStyle = ink; text(ctx, t, x0 + w / 2, y + h * 0.22, "center");
+    return w;
+  }
+  const xiTags = (p) => [p.cap ? "C" : "", p.wk ? "WK" : ""].filter(Boolean);
+  function xiTitle(ctx, W, d, acc, italic, y, P) {
+    ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, y, 10, "center");
+    ctx.save(); ctx.translate(W / 2, y + 112); if (italic) ctx.transform(1, 0, -0.18, 1, 0, 0); font(ctx, 120, 700); ctx.textAlign = "center";
+    if (italic) { ctx.fillStyle = mix(P.deep, "#000000", 0.3); ctx.fillText("PLAYING XI", 6, 8); const g = ctx.createLinearGradient(0, -100, 0, 0); g.addColorStop(0, "#FFFFFF"); g.addColorStop(1, mix("#FFFFFF", acc, 0.35)); ctx.fillStyle = g; } else ctx.fillStyle = "#FFFFFF";
+    ctx.fillText("PLAYING XI", 0, 0); ctx.restore();
+  }
+  function tossPill(ctx, W, y, t, acc) {
+    if (!t) return; const s = t.toUpperCase(); font(ctx, 22, 700, BODY); const w = Math.min(W - 60, ctx.measureText(s).width + s.length * 2 + 60);
+    ctx.fillStyle = rgba(acc, 0.14); roundRect(ctx, W / 2 - w / 2, y, w, 46, 23); ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = acc; fit(ctx, s, w - 60 - s.length * 2, 22, 700, BODY, 12); spaced(ctx, s, W / 2 + 2, y + 30, 2, "center");
+  }
+  function xiBackground(ctx, W, H, d) {
+    const P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), BG = mix(P.deep, "#000000", 0.4);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W * 0.7, 200, 40, W * 0.7, 200, 1100); g.addColorStop(0, rgba(P.base, 0.75)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    return { P, acc: P.mvp || P.accent, BG };
+  }
+
+  function drawXiDuel(ctx, W, H, th, d) {
+    const lu = d.lineup, { P, acc } = xiBackground(ctx, W, H, d), dy = (H - 1350) * 0.3;
+    xiTitle(ctx, W, d, acc, false, 70 + dy, P);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, (lu.stage || "").toUpperCase(), W - 120, 22, 600, BODY); spaced(ctx, (lu.stage || "").toUpperCase(), W / 2 + 3, 222 + dy, 6, "center");
+    const gap = 24, cw = (W - 60 - gap) / 2, top = 262 + dy, hh = 170, n = Math.max(1, ...lu.teams.map((t) => t.players.length));
+    lu.teams.forEach((t, k) => {
+      const tp = teamPalette(t), X = 30 + k * (cw + gap), sk = 34, cap = d.images.caps && d.images.caps[k];
+      slant(ctx, X, top + 40, cw, hh - 40, sk); const g = ctx.createLinearGradient(X, 0, X + cw, 0); g.addColorStop(k ? 1 : 0, tp.base); g.addColorStop(k ? 0 : 1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = g; ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(X + sk, top + 40, cw - sk, 3);
+      if (cap) { const bx = k ? X + sk / 2 + 80 : X + cw - sk / 2 - 80; ctx.save(); ctx.beginPath(); ctx.rect(X, top - 20, cw, hh + 20); ctx.clip(); bust(ctx, cap, bx, top + hh, 175); ctx.restore(); }
+      const ls = 72, cy = top + 40 + (hh - 40) / 2, lx = k ? X + cw - 24 - ls / 2 : X + sk + 4 + ls / 2; logo(ctx, d.images.teams[k], t, lx, cy, ls);
+      const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 8; fit(ctx, nm, cw - (cap ? 190 : 60) - ls, 40, 700); text(ctx, nm, k ? lx - ls / 2 - 12 : lx + ls / 2 + 12, cy + 14, k ? "right" : "left"); ctx.shadowBlur = 0;
+      const rs = top + hh + 18, rh = Math.min(H > 1500 ? 110 : 80, (H - 130 - rs) / n);
+      t.players.forEach((p, i) => {
+        const y = rs + i * rh, tg = xiTags(p);
+        if (i % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,0.05)"; roundRect(ctx, X, y, cw, rh - 4, 10); ctx.fill(); }
+        ctx.fillStyle = tp.base; ctx.fillRect(k ? X + cw - 4 : X, y + 6, 4, rh - 16);
+        ctx.fillStyle = acc; font(ctx, Math.min(30, rh * 0.42), 700); text(ctx, String(i + 1).padStart(2, "0"), k ? X + cw - 22 : X + 22, y + rh * 0.62, k ? "right" : "left");
+        let edge = k ? X + 20 : X + cw - 16;
+        for (const c of tg) { const w = pill(ctx, c, edge, y + rh / 2 - 2, Math.min(32, rh * 0.5), c === "C" ? acc : "rgba(255,255,255,0.18)", c === "C" ? "#0B0D12" : "#FFFFFF", !k); edge += k ? w + 6 : -(w + 6); }
+        const nm2 = p.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm2, cw - 90 - tg.length * 60, Math.min(30, rh * 0.44), 600); text(ctx, nm2, k ? X + cw - 70 : X + 70, y + rh * 0.62, k ? "right" : "left");
+      });
+    });
+    tossPill(ctx, W, H - 104, lu.toss, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  function drawXiSplit(ctx, W, H, th, d) {
+    const lu = d.lineup, P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), acc = P.mvp || P.accent, dy = (H - 1350) * 0.3;
+    lu.teams.forEach((t, k) => {
+      const tp = teamPalette(t), cap = d.images.caps && d.images.caps[k]; ctx.save(); ctx.beginPath();
+      if (!k) { ctx.moveTo(0, 0); ctx.lineTo(W / 2 + 60, 0); ctx.lineTo(W / 2 - 60, H); ctx.lineTo(0, H); } else { ctx.moveTo(W / 2 + 60, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H); ctx.lineTo(W / 2 - 60, H); }
+      ctx.closePath(); ctx.clip(); const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, tp.base); g.addColorStop(1, mix(tp.deep, "#000000", 0.45)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; font(ctx, 420, 700); text(ctx, t.short || "", k ? W + 20 : -20, H * 0.62, k ? "right" : "left");
+      if (cap) bust(ctx, cap, k ? W - 170 : 170, H, 360 + dy * 0.6);
+      const sh = ctx.createLinearGradient(0, H - 140, 0, H); sh.addColorStop(0, "rgba(0,0,0,0)"); sh.addColorStop(1, rgba(mix(tp.deep, "#000000", 0.6), 0.9)); ctx.fillStyle = sh; ctx.fillRect(0, H - 140, W, 140);
+      ctx.restore();
+    });
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(0, 0, W, 250 + dy);
+    xiTitle(ctx, W, d, "#FFFFFF", true, 64 + dy, P);
+    ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, (lu.stage || "").toUpperCase(), W - 120, 22, 600, BODY); spaced(ctx, (lu.stage || "").toUpperCase(), W / 2 + 3, 222 + dy, 6, "center");
+    const n = Math.max(1, ...lu.teams.map((t) => t.players.length)), rs = 370 + dy, rh = Math.min(50 + dy * 0.08, 560 / n);
+    lu.teams.forEach((t, k) => {
+      const tp = teamPalette(t), X = k ? W - 40 : 40, al = k ? "right" : "left", ls = 76;
+      logo(ctx, d.images.teams[k], t, k ? W - 40 - ls / 2 : 40 + ls / 2, 300 + dy, ls);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, (t.name || "").toUpperCase(), 330, 40, 700); text(ctx, (t.name || "").toUpperCase(), k ? W - 50 - ls : 50 + ls, 314 + dy, al);
+      t.players.forEach((p, i) => {
+        const y = rs + i * rh, nm = p.name.toUpperCase(), tg = xiTags(p).join(" · ");
+        ctx.fillStyle = rgba(tp.accent || acc, 0.95); font(ctx, 24, 700); text(ctx, String(i + 1), X, y + 24, al);
+        ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, 300, 30, 600); const nx = k ? X - 44 : X + 44; text(ctx, nm, nx, y + 24, al);
+        if (tg) { const w = ctx.measureText(nm).width; pill(ctx, tg, k ? nx - w - 12 : nx + w + 12, y + 14, 26, acc, "#0B0D12", !!k); }
+      });
+    });
+    const vr = 54; ctx.beginPath(); ctx.arc(W / 2, 300 + dy, vr, 0, 7); ctx.fillStyle = "#0B0D12"; ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 5; ctx.stroke(); ctx.fillStyle = acc; font(ctx, 40, 700); text(ctx, "VS", W / 2, 314 + dy, "center");
+    if (lu.toss) { const s = lu.toss.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, s, W - 120, 20, 700, BODY, 12); spaced(ctx, s, W / 2 + 2, H - 30, 2, "center"); }
+    grain(ctx, W, H, 0.05);
+  }
+
+  function drawXiSheet(ctx, W, H, th, d) {
+    const lu = d.lineup, { P, acc } = xiBackground(ctx, W, H, d), dy = (H - 1350) * 0.3;
+    lu.teams.forEach((t, k) => {
+      const tp = teamPalette(t), cap = d.images.caps && d.images.caps[k]; ctx.save(); ctx.beginPath(); ctx.rect(k ? W - 300 : 0, 0, 300, 300 + dy); ctx.clip();
+      const g = ctx.createRadialGradient(k ? W - 120 : 120, 220 + dy, 10, k ? W - 120 : 120, 220 + dy, 300); g.addColorStop(0, rgba(tp.base, 0.8)); g.addColorStop(1, rgba(tp.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, 300 + dy);
+      if (cap) bust(ctx, cap, k ? W - 140 : 140, 300 + dy, 260); ctx.restore();
+    });
+    ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), 420, 22, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, 74 + dy, 8, "center");
+    ctx.fillStyle = "#FFFFFF"; font(ctx, 104, 700); text(ctx, "PLAYING", W / 2, 176 + dy, "center"); ctx.fillStyle = acc; font(ctx, 84, 700); text(ctx, "XI", W / 2, 256 + dy, "center");
+    const top = 300 + dy, hh = 92;
+    lu.teams.forEach((t, k) => {
+      const tp = teamPalette(t), X = k ? W / 2 + 4 : 30, w = W / 2 - 34;
+      const g = ctx.createLinearGradient(X, 0, X + w, 0); g.addColorStop(k ? 1 : 0, tp.base); g.addColorStop(k ? 0 : 1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = g; ctx.fillRect(X, top, w, hh);
+      const ls = 68; logo(ctx, d.images.teams[k], t, k ? X + w - 20 - ls / 2 : X + 20 + ls / 2, top + hh / 2, ls);
+      const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, w - ls - 60, 36, 700); text(ctx, nm, k ? X + w - 36 - ls : X + 36 + ls, top + hh / 2 + 13, k ? "right" : "left");
+    });
+    const n = Math.max(1, ...lu.teams.map((t) => t.players.length)), rs = top + hh + 10, rh = Math.min(90, (H - 140 - rs) / n);
+    for (let i = 0; i < n; i++) {
+      const y = rs + i * rh;
+      ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)"; ctx.fillRect(30, y, W - 60, rh);
+      ctx.fillStyle = acc; font(ctx, Math.min(32, rh * 0.42), 700); text(ctx, String(i + 1), W / 2, y + rh * 0.64, "center");
+      lu.teams.forEach((t, k) => {
+        const p = t.players[i]; if (!p) return; const tg = xiTags(p), nm = p.name.toUpperCase();
+        ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W / 2 - 150 - tg.length * 50, Math.min(32, rh * 0.42), 600); text(ctx, nm, k ? W - 54 : 54, y + rh * 0.64, k ? "right" : "left");
+        let edge = k ? W / 2 + 36 : W / 2 - 36; for (const c of tg) { const w = pill(ctx, c, edge, y + rh / 2, Math.min(32, rh * 0.48), c === "C" ? acc : "rgba(255,255,255,0.18)", c === "C" ? "#0B0D12" : "#FFFFFF", !k); edge += k ? w + 6 : -(w + 6); }
+      });
+    }
+    lu.teams.forEach((t, k) => { ctx.fillStyle = teamPalette(t).base; ctx.fillRect(k ? W - 34 : 30, rs, 4, rh * n); });
+    tossPill(ctx, W, H - 112, lu.toss, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1632,6 +1750,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "lineup") { ({ D: drawXiDuel, P: drawXiSplit, S: drawXiSheet })[style](ctx, W, H, th, d); return cv; }
     if (kind === "groups") { ({ B: drawGroupBands, D: drawGroupDraw, S: drawGroupShowcase })[style](ctx, W, H, th, d); return cv; }
     if (kind === "schedule") { (style === "W" ? drawShowdown : drawTimeline)(ctx, W, H, th, d); return cv; }
     if (kind === "potm" || kind === "allround") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
