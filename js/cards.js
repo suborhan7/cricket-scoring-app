@@ -24,10 +24,11 @@
   const GROUP_STYLES = [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]];
   const LINEUP_STYLES = [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]];
   const SQUAD_STYLES = [["R", "Roster"], ["C", "Captain"], ["N", "Numbers"]];
+  const VERSUS_STYLES = [["C", "Clash"], ["F", "Frames"], ["S", "Stack"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1739,18 +1740,20 @@
 
   const SQ_ROLE = { batter: "BAT", bowler: "BOWL", allrounder: "AR", keeper: "WK" };
   const initialsOf = (n) => String(n || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  function hueOf(h) {
+  function hueSat(h) {
     const [r, g, b] = hexRgb(h).map((v) => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
     if (!d) return { h: 0, s: 0 };
     const hh = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
     return { h: hh * 60, s: d / (1 - Math.abs(mx + mn - 1) || 1) };
   }
-  // The team's colours for a squad card. A red shirt is toned towards the tournament colour, so the card isn't all red.
-  function squadTones(d) {
-    const t = d.squad.team, tp = teamPalette(t), P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542");
-    const { h, s } = hueOf(tp.base), red = s > 0.35 && (h < 18 || h > 335);
-    return { tp, P, red, base: red ? mix(tp.base, P.base, 0.65) : tp.base, deep: red ? mix(tp.deep, P.deep, 0.7) : tp.deep, hi: red ? (d.squad.team.c2 && hueOf(d.squad.team.c2).s > 0.35 ? d.squad.team.c2 : P.accent) : tp.base, acc: tp.mvp || tp.accent };
+  // A team's colours for a poster. A red shirt is toned towards the tournament colour, so the card isn't all red,
+  // and its numbers and rings take the shirt's second colour.
+  function teamTones(t, d) {
+    const tp = teamPalette(t), P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542");
+    const { h, s } = hueSat(tp.base), red = s > 0.35 && (h < 18 || h > 335);
+    return { tp, P, red, base: red ? mix(tp.base, P.base, 0.65) : tp.base, deep: red ? mix(tp.deep, P.deep, 0.7) : tp.deep, hi: red ? (t.c2 && hueSat(t.c2).s > 0.35 ? t.c2 : P.accent) : tp.base, acc: tp.mvp || tp.accent };
   }
+  const squadTones = (d) => teamTones(d.squad.team, d);
   function squadBg(ctx, W, H, T) {
     ctx.fillStyle = mix(T.deep, "#000000", 0.45); ctx.fillRect(0, 0, W, H);
     const g = ctx.createRadialGradient(W * 0.75, 160, 40, W * 0.75, 160, 1000); g.addColorStop(0, rgba(T.red ? T.tp.base : T.base, T.red ? 0.35 : 0.85)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -1840,6 +1843,120 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Versus: Clash, Frames and Stack ----------
+
+  // The match line under the title, and the date split into day and time.
+  const vsWhen = (v) => { const [a, b] = String(v.when || "").split(" · "); return [a || "", b || ""]; };
+  function vsTitle(ctx, W, d, y, acc, P) {
+    ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, y, 10, "center");
+    ctx.save(); ctx.translate(W / 2, y + 100); ctx.transform(1, 0, -0.18, 1, 0, 0); fit(ctx, "MATCH DAY", W - 120, 104, 700); ctx.textAlign = "center";
+    ctx.fillStyle = mix(P.deep, "#000000", 0.4); ctx.fillText("MATCH DAY", 5, 7); const g = ctx.createLinearGradient(0, -90, 0, 0); g.addColorStop(0, "#FFFFFF"); g.addColorStop(1, mix("#FFFFFF", acc, 0.35)); ctx.fillStyle = g; ctx.fillText("MATCH DAY", 0, 0); ctx.restore();
+    const st = (d.versus.stage || "").toUpperCase(); if (st) { ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, st, W - 160, 22, 600, BODY); spaced(ctx, st, W / 2 + 3, y + 146, 6, "center"); }
+  }
+  function vsMark(ctx, x, y, s, acc, P) {
+    ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.18, 1, 0, 0); font(ctx, s, 700); ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillText("VS", s * 0.04, s * 0.06);
+    const g = ctx.createLinearGradient(-s * 0.6, -s * 0.8, s * 0.6, 0); g.addColorStop(0, "#FFFFFF"); g.addColorStop(0.55, mix("#FFFFFF", acc, 0.3)); g.addColorStop(1, acc); ctx.fillStyle = g; ctx.fillText("VS", 0, 0); ctx.restore();
+  }
+  function vsSponsors(ctx, d, H) { const on = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false); if (on) sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)"); return on ? 70 : 0; }
+
+  // Each half of the card in its team's colours, the captains standing large, VS on the seam.
+  function drawVsClash(ctx, W, H, th, d) {
+    const v = d.versus, dy = (H - 1350) * 0.5, P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), acc = P.mvp || P.accent, caps = d.images.caps || [], seam = 110;
+    const S = v.teams.map((t) => teamTones(t, d)), half = (k) => { ctx.beginPath(); if (!k) { ctx.moveTo(0, 0); ctx.lineTo(W / 2 + seam, 0); ctx.lineTo(W / 2 - seam, H); ctx.lineTo(0, H); } else { ctx.moveTo(W / 2 + seam, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H); ctx.lineTo(W / 2 - seam, H); } ctx.closePath(); };
+    v.teams.forEach((t, k) => {
+      const T = S[k], cx = k ? W * 0.74 : W * 0.26; ctx.save(); half(k); ctx.clip();
+      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.4)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      const gl = ctx.createRadialGradient(cx, H * 0.5, 30, cx, H * 0.5, 520); gl.addColorStop(0, rgba(mix(T.base, "#FFFFFF", 0.25), 0.55)); gl.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "rgba(255,255,255,0.07)"; font(ctx, 400, 700); text(ctx, t.short || "", k ? W + 30 : -30, H * 0.6 + dy * 0.4, k ? "right" : "left");
+      if (caps[k]) bust(ctx, caps[k], cx, H - 120 - dy * 0.1, 700 + dy * 0.9);
+      else logo(ctx, d.images.teams[k], t, cx, H * 0.53 + dy * 0.2, 340);
+      ctx.restore();
+    });
+    ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(W / 2 + seam, 0); ctx.lineTo(W / 2 - seam, H); ctx.stroke(); ctx.restore();
+    const top = ctx.createLinearGradient(0, 0, 0, 330 + dy); top.addColorStop(0, "rgba(0,0,0,0.55)"); top.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = top; ctx.fillRect(0, 0, W, 330 + dy);
+    vsTitle(ctx, W, d, 66 + dy * 0.6, acc, P);
+    if (caps.some(Boolean)) v.teams.forEach((t, k) => logo(ctx, d.images.teams[k], t, k ? W - 105 : 105, 330 + dy * 0.8, 130));
+    vsMark(ctx, W / 2, H * 0.5 + 60 + dy * 0.2, 230, acc, P);
+    const sp = vsSponsors(ctx, d, H), bt = H - 430 - sp;
+    const bot = ctx.createLinearGradient(0, bt, 0, H); bot.addColorStop(0, "rgba(0,0,0,0)"); bot.addColorStop(0.45, "rgba(0,0,0,0.6)"); bot.addColorStop(1, "rgba(0,0,0,0.85)"); ctx.fillStyle = bot; ctx.fillRect(0, bt, W, H - bt);
+    v.teams.forEach((t, k) => {
+      const nm = (t.name || "").toUpperCase(), X = k ? W - 50 : 50; ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 10;
+      fit(ctx, nm, W / 2 - 90, 62, 700); text(ctx, nm, X, H - 214 - sp, k ? "right" : "left"); ctx.shadowBlur = 0;
+      ctx.fillStyle = S[k].hi === S[k].tp.base ? S[k].acc : S[k].hi; ctx.fillRect(k ? X - 90 : X, H - 196 - sp, 90, 6);
+    });
+    const [day, time] = vsWhen(v), line = [day, time].filter(Boolean).join("  ·  ").toUpperCase();
+    font(ctx, 34, 700); const lw = Math.min(W - 120, ctx.measureText(line).width + 90);
+    ctx.fillStyle = acc; slant(ctx, W / 2 - lw / 2, H - 160 - sp, lw, 62, 14); ctx.fill();
+    ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; fit(ctx, line, lw - 60, 34, 700); text(ctx, line, W / 2, H - 117 - sp, "center");
+    const sub = [v.venue, v.rules].filter(Boolean).join("  ·  "); ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, sub, W - 160, 24, 600, BODY); text(ctx, sub, W / 2, H - 62 - sp, "center");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // Two tall team-colour frames with the captains inside, on the tournament background.
+  function drawVsFrames(ctx, W, H, th, d) {
+    const v = d.versus, { P, acc, BG } = xiBackground(ctx, W, H, d), dy = (H - 1350) * 0.5, caps = d.images.caps || [];
+    v.teams.forEach((t, k) => { const T = teamTones(t, d), g = ctx.createRadialGradient(k ? W : 0, H * 0.5, 40, k ? W : 0, H * 0.5, 700); g.addColorStop(0, rgba(T.base, 0.4)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); });
+    vsTitle(ctx, W, d, 66 + dy * 0.5, acc, P);
+    const sp = vsSponsors(ctx, d, H), pw = (W - 60 - 90) / 2, y0 = 270 + dy * 0.8, ph = Math.min(H > 1500 ? 900 : 640, H - y0 - 330 - sp), sk = 70;
+    v.teams.forEach((t, k) => {
+      const T = teamTones(t, d), X = k ? W - 30 - pw : 30;
+      ctx.save(); slant(ctx, X, y0, pw, ph, sk); const g = ctx.createLinearGradient(0, y0, 0, y0 + ph); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.3)); ctx.fillStyle = g; ctx.shadowColor = rgba(T.base, 0.6); ctx.shadowBlur = 40; ctx.fill(); ctx.restore();
+      ctx.save(); slant(ctx, X, y0, pw, ph, sk); ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.08)"; font(ctx, 300, 700); text(ctx, t.short || "", X + pw / 2, y0 + ph * 0.55, "center");
+      if (caps[k]) bust(ctx, caps[k], X + pw / 2, y0 + ph, ph * 0.86); else logo(ctx, d.images.teams[k], t, X + pw / 2, y0 + ph * 0.45, pw * 0.62);
+      ctx.restore();
+      slant(ctx, X, y0, pw, ph, sk); ctx.strokeStyle = rgba("#FFFFFF", 0.5); ctx.lineWidth = 3; ctx.stroke();
+      if (caps[k]) logo(ctx, d.images.teams[k], t, k ? X + pw - 66 : X + sk + 56, y0 + 66, 108);
+      const nh = 78, ny = y0 + ph - nh / 2, nk = nh * 0.25, nx = X - 6, nw = pw + 12;
+      slant(ctx, nx, ny, nw, nh, nk); ctx.fillStyle = "#FFFFFF"; ctx.fill();
+      ctx.fillStyle = T.hi === T.tp.base ? T.base : T.hi; ctx.fillRect(k ? nx + nw - nk - 10 : nx + nk, ny, 10, nh);
+      const nm = (t.name || "").toUpperCase(); ctx.fillStyle = mix(T.deep, "#000000", 0.35); fit(ctx, nm, nw - 70, 46, 700); text(ctx, nm, nx + nw / 2, ny + nh / 2 + 16, "center");
+    });
+    const my = y0 + ph * 0.42; ctx.beginPath(); ctx.arc(W / 2, my, 74, 0, 7); ctx.fillStyle = mix(BG, "#000000", 0.3); ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 5; ctx.stroke();
+    vsMark(ctx, W / 2 + 4, my + 30, 84, acc, P);
+    const [day, time] = vsWhen(v), iy = y0 + ph + 70 + (H - sp - 60 - (y0 + ph + 70) - 190) * 0.4;
+    ctx.fillStyle = "#FFFFFF"; const big = [day, time].filter(Boolean).join("  ·  ").toUpperCase(); fit(ctx, big, W - 120, 58, 700); text(ctx, big, W / 2, iy + 58, "center");
+    if (v.venue) { ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, v.venue, W - 160, 28, 600, BODY); text(ctx, v.venue, W / 2, iy + 108, "center"); }
+    if (v.rules) tossPill(ctx, W, iy + 136, v.rules, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // One team above the other, split by a band with the date and VS.
+  function drawVsStack(ctx, W, H, th, d) {
+    const v = d.versus, dy = (H - 1350) * 0.5, { P, acc, BG } = xiBackground(ctx, W, H, d), caps = d.images.caps || [];
+    const sp = vsSponsors(ctx, d, H), h0 = 250 + dy * 0.6, h1 = H - 150 - sp, mid = (h0 + h1) / 2, bh = 116;
+    v.teams.forEach((t, k) => {
+      const T = teamTones(t, d), y = k ? mid : h0, hh = k ? h1 - mid : mid - h0, px = k ? W * 0.28 : W * 0.72;
+      ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, hh); ctx.clip();
+      const g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(k ? 1 : 0, T.base); g.addColorStop(k ? 0 : 1, mix(T.deep, "#000000", 0.3)); ctx.fillStyle = g; ctx.fillRect(0, y, W, hh);
+      const gl = ctx.createRadialGradient(px, y + hh * 0.6, 20, px, y + hh * 0.6, 420); gl.addColorStop(0, rgba(mix(T.base, "#FFFFFF", 0.3), 0.5)); gl.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = gl; ctx.fillRect(0, y, W, hh);
+      ctx.fillStyle = "rgba(255,255,255,0.07)"; font(ctx, hh * 0.9, 700); text(ctx, t.short || "", k ? W + 20 : -20, y + hh * 0.85, k ? "right" : "left");
+      const bot = k ? h1 : mid - bh / 2 + 6;
+      if (caps[k]) bust(ctx, caps[k], px, bot, (bot - y) * 0.98);
+      ctx.restore();
+      const tx = k ? W - 50 : 50, al = k ? "right" : "left", ly = (k ? mid + bh / 2 : h0) + (hh - bh / 2) * 0.32, ls = Math.min(150, hh * 0.36);
+      logo(ctx, d.images.teams[k], t, caps[k] ? (k ? W - 50 - ls / 2 : 50 + ls / 2) : W / 2 + (k ? 1 : -1) * 0, ly, caps[k] ? ls : ls * 1.3);
+      const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 10;
+      if (caps[k]) { const words = nm.split(" "), l2 = words.length > 1 ? [words.slice(0, -1).join(" "), words[words.length - 1]] : [nm]; l2.forEach((l, i) => { fit(ctx, l, W * 0.5, 84, 700); text(ctx, l, tx, ly + ls / 2 + 84 + i * 82, al); }); }
+      else { fit(ctx, nm, W - 120, 84, 700); text(ctx, nm, W / 2, ly + ls * 0.65 + 100, "center"); }
+      ctx.shadowBlur = 0;
+    });
+    const [day, time] = vsWhen(v);
+    ctx.save(); ctx.beginPath(); ctx.moveTo(0, mid - bh / 2 + 24); ctx.lineTo(W, mid - bh / 2 - 24); ctx.lineTo(W, mid + bh / 2 - 24); ctx.lineTo(0, mid + bh / 2 + 24); ctx.closePath();
+    const gb = ctx.createLinearGradient(0, 0, W, 0); gb.addColorStop(0, acc); gb.addColorStop(1, mix(acc, "#FFFFFF", 0.25)); ctx.fillStyle = gb; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 24; ctx.fill(); ctx.restore();
+    const ink = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; ctx.fillStyle = ink;
+    fit(ctx, day.toUpperCase(), W / 2 - 170, 40, 700); text(ctx, day.toUpperCase(), W / 2 - 110, mid + 20, "right");
+    fit(ctx, time.toUpperCase(), W / 2 - 170, 40, 700); text(ctx, time.toUpperCase(), W / 2 + 110, mid + 6, "left");
+    ctx.beginPath(); ctx.arc(W / 2, mid, 82, 0, 7); ctx.fillStyle = mix(BG, "#000000", 0.3); ctx.fill(); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 5; ctx.stroke();
+    vsMark(ctx, W / 2 + 4, mid + 32, 90, acc, P);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, h0); const gt = ctx.createRadialGradient(W * 0.7, 0, 20, W * 0.7, 0, 700); gt.addColorStop(0, rgba(P.base, 0.7)); gt.addColorStop(1, rgba(P.base, 0)); ctx.fillStyle = gt; ctx.fillRect(0, 0, W, h0);
+    vsTitle(ctx, W, d, 62 + dy * 0.4, acc, P);
+    ctx.fillStyle = BG; ctx.fillRect(0, h1, W, H - h1);
+    const sub = [v.venue, v.rules].filter(Boolean).join("  ·  "); ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, sub.toUpperCase(), W - 140, 26, 600, BODY); spaced(ctx, sub.toUpperCase(), W / 2 + 2, h1 + 64, 3, "center");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1856,6 +1973,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "versus") { ({ C: drawVsClash, F: drawVsFrames, S: drawVsStack })[style](ctx, W, H, th, d); return cv; }
     if (kind === "squad") { ({ R: drawSquadRoster, C: drawSquadCaptain, N: drawSquadNumbers })[style](ctx, W, H, th, d); return cv; }
     if (kind === "lineup") { ({ D: drawXiDuel, P: drawXiSplit, S: drawXiSheet })[style](ctx, W, H, th, d); return cv; }
     if (kind === "groups") { ({ B: drawGroupBands, D: drawGroupDraw, S: drawGroupShowcase })[style](ctx, W, H, th, d); return cv; }

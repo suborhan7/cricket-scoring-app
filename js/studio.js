@@ -199,13 +199,15 @@
     return `${day} · ${time}`;
   }
 
-  function versusCard(T, m) {
+  async function versusCard(T, m) {
     const ti = tournamentInfo(T.t), tms = [lg.teamById(m.team1_id), lg.teamById(m.team2_id)];
     const teams = tms.map((t) => ({ name: t.name, short: t.short_name, c1: t.primary_color, c2: t.secondary_color }));
     const d = base({ ti }, {
       versus: { teams, when: whenText(m.starts_at), venue: m.venue || "", stage: matchLabel(m) || (T.t.kind === "series" ? "Series" : ""), rules: `${T.t.overs_per_side} overs a side` },
     });
     d.urls.teams = tms.map((t) => url("logos", t.logo_path));
+    const caps = await captainPhotos(tms.map((t) => t.id)).catch(() => new Map());
+    d.urls.caps = tms.map((t) => caps.get(t.id) || "");
     return { kind: "versus", data: d, title: `${tms[0].short_name} v ${tms[1].short_name}` };
   }
 
@@ -665,7 +667,7 @@
       const ms = E.replay(rec.match, rec.events).milestones.find((m) => m.index === +d.i);
       if (ms) show(await milestoneCard(rec, ms), "score");
     },
-    "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) show(versusCard(L.tour, m), "tour"); },
+    "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) versusCard(L.tour, m).then((c) => show(c, "tour")); },
     "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
     "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) scheduleCard(L.tour, p).then((c) => show(c, "tour")); },
     "card-groups"(d) { groupsCard(L.tour, +d.p || 0, d.g || "").then((c) => show(c, "tour")); },
