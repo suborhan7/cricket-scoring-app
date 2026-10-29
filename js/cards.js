@@ -25,10 +25,11 @@
   const LINEUP_STYLES = [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]];
   const SQUAD_STYLES = [["R", "Roster"], ["C", "Captain"], ["N", "Numbers"]];
   const VERSUS_STYLES = [["C", "Clash"], ["F", "Frames"], ["S", "Stack"]];
+  const TABLE_STYLES = [["L", "Ladder"], ["G", "Glass"], ["T", "Leader"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1957,6 +1958,107 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Points table: Ladder, Glass and Leader ----------
+
+  const tableRows = (d, H) => d.table.rows.slice(0, H > 1500 ? 12 : 10);
+  const tableLine = (d) => [d.table.group ? `GROUP ${d.table.group}` : "STANDINGS", d.table.sub || ""].filter(Boolean).join(" · ").toUpperCase();
+  const FORM_INK = { W: "#2BD67B", L: "#FF5A6A", T: "#F5C542", N: "#8A93A6" };
+  function formDots(ctx, f, x, cy, r, right) {
+    const list = (f || []).slice(-5); list.forEach((c, i) => { const cx = right ? x - (list.length - 1 - i) * r * 2.5 - r : x + i * r * 2.5 + r; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fillStyle = FORM_INK[c] || FORM_INK.N; ctx.fill(); ctx.fillStyle = "#0B0D12"; font(ctx, r * 1.1, 700, BODY); text(ctx, c, cx, cy + r * 0.38, "center"); });
+  }
+  // The column heads and the stat cells of a table row, right to left from `x1`.
+  const TCOLS = [["PTS", 120], ["NRR", 120], ["L", 60], ["W", 60], ["P", 60]];
+  function tableHead(ctx, x1, y, ink) { let x = x1; ctx.fillStyle = ink; font(ctx, 20, 700, BODY); for (const [l, w] of TCOLS) { spaced(ctx, l, x - w / 2, y, 2, "center"); x -= w; } return x; }
+  function tableCells(ctx, r, x1, cy, h, acc, q, pillPts) {
+    let x = x1; const fs = Math.min(36, h * 0.38);
+    for (const [l, w] of TCOLS) {
+      const cx = x - w / 2;
+      if (l === "PTS") { if (pillPts) { ctx.fillStyle = q ? acc : "rgba(255,255,255,0.14)"; roundRect(ctx, cx - 44, cy - h * 0.32, 88, h * 0.64, 12); ctx.fill(); } ctx.fillStyle = pillPts && q ? (lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF") : "#FFFFFF"; font(ctx, Math.min(48, h * 0.46), 700); text(ctx, String(r.pts), cx, cy + Math.min(48, h * 0.46) * 0.36, "center"); }
+      else if (l === "NRR") { ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, Math.min(26, h * 0.3), 600, BODY); text(ctx, r.nrr, cx, cy + 9, "center"); }
+      else { ctx.fillStyle = "#FFFFFF"; font(ctx, fs, 600); text(ctx, String(r[l.toLowerCase()]), cx, cy + fs * 0.36, "center"); }
+      x -= w;
+    }
+    return x;
+  }
+  function qualifyNote(ctx, W, y, q, n, acc) { if (!q || n <= q) return; ctx.fillStyle = acc; ctx.fillRect(50, y - 8, 30, 8); ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 22, 600, BODY); text(ctx, `Top ${q} go through`, 94, y); }
+
+  // Each team on a slanted bar in its own colours, the qualifiers set apart by a cut line.
+  function drawTableLadder(ctx, W, H, th, d) {
+    const rows = tableRows(d, H), F = posterFrame(ctx, W, H, d, "POINTS TABLE", tableLine(d), true), { acc, hy } = F, q = Math.min(d.table.qualify || 2, rows.length);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, F.line, W - 140, 24, 600); spaced(ctx, F.line, W / 2 + 4, 270 + hy, 8, "center");
+    const y0 = 330 + hy * 2, n = Math.max(1, rows.length), gap = 12, cut = q && n > q ? 26 : 0, rh = Math.min(H > 1500 ? 150 : n <= 6 ? 124 : 92, (F.bottom - 50 - y0 - 30 - cut - gap * (n - 1)) / n), off = Math.max(0, (F.bottom - 50 - y0 - 30 - cut - gap * (n - 1) - rh * n) / 3);
+    tableHead(ctx, W - 40, y0 + 10 + off, "rgba(255,255,255,0.6)");
+    rows.forEach((r, i) => {
+      const T = teamTones(r, d), y = y0 + off + 30 + i * (rh + gap) + (i >= q ? cut : 0), sk = rh * 0.3, cy = y + rh / 2, x0 = 40, x1 = W - 40, top = i < q;
+      ctx.save(); slant(ctx, x0, y, x1 - x0, rh, sk); const g = ctx.createLinearGradient(x0, 0, x1, 0); g.addColorStop(0, rgba(T.base, top ? 1 : 0.85)); g.addColorStop(0.55, rgba(mix(T.deep, "#000000", 0.3), 0.95)); g.addColorStop(1, rgba(mix(T.deep, "#000000", 0.55), 0.95));
+      ctx.fillStyle = g; if (top) { ctx.shadowColor = rgba(T.base, 0.55); ctx.shadowBlur = 22; } ctx.fill(); ctx.restore();
+      ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fillRect(x0 + sk, y, x1 - x0 - sk, 2);
+      if (top) { ctx.fillStyle = acc; slant(ctx, x1 - 10, y, 10 + sk * 0, rh, 0); ctx.fill(); }
+      ctx.fillStyle = "rgba(255,255,255,0.9)"; font(ctx, rh * 0.62, 700); text(ctx, String(i + 1), x0 + sk + 30, cy + rh * 0.22, "center");
+      const ls = rh * 0.74; logo(ctx, d.images.teams[i], r, x0 + sk + 70 + ls / 2, cy, ls);
+      const xs = tableCells(ctx, r, x1 - 14, cy, rh, acc, top, true), nx = x0 + sk + 84 + ls, nm = (r.name || "").toUpperCase();
+      ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 6; fit(ctx, nm, xs - nx - 10, Math.min(44, rh * 0.44), 700); text(ctx, nm, nx, cy + Math.min(44, rh * 0.44) * 0.36); ctx.shadowBlur = 0;
+      if (top && i === q - 1 && cut) { const ly = y + rh + gap / 2 + cut / 2; ctx.setLineDash([14, 10]); ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(40, ly); ctx.lineTo(W - 40, ly); ctx.stroke(); ctx.setLineDash([]); }
+    });
+    qualifyNote(ctx, W, F.bottom - 10, q, rows.length, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // Glass rows on the tournament colours, a team-colour edge and each team's recent form.
+  function drawTableGlass(ctx, W, H, th, d) {
+    const rows = tableRows(d, H), F = posterFrame(ctx, W, H, d, "POINTS TABLE", tableLine(d), false), { P, acc, hy } = F, q = Math.min(d.table.qualify || 2, rows.length);
+    const gl = ctx.createRadialGradient(0, 260, 20, 0, 260, 700); gl.addColorStop(0, rgba(acc, 0.2)); gl.addColorStop(1, rgba(acc, 0)); ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+    const gr = ctx.createLinearGradient(W / 2 - 190, 0, W / 2 + 190, 0); gr.addColorStop(0, acc); gr.addColorStop(1, P.base); ctx.fillStyle = gr; roundRect(ctx, W / 2 - 190, 228 + hy, 380, 6, 3); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, F.line, W - 140, 24, 600); spaced(ctx, F.line, W / 2 + 4, 282 + hy, 8, "center");
+    const form = rows.some((r) => r.form && r.form.length), y0 = 330 + hy * 2, n = Math.max(1, rows.length), gap = 10, rh = Math.min(H > 1500 ? 150 : n <= 6 ? 120 : 94, (F.bottom - 50 - y0 - 34 - gap * (n - 1)) / n), off = Math.max(0, (F.bottom - 50 - y0 - 34 - gap * (n - 1) - rh * n) / 3);
+    const xs0 = tableHead(ctx, W - 50, y0 + 12 + off, "rgba(255,255,255,0.55)"); if (form) { ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 20, 700, BODY); spaced(ctx, "FORM", xs0 - 10, y0 + 12 + off, 2, "right"); }
+    rows.forEach((r, i) => {
+      const T = teamTones(r, d), y = y0 + off + 34 + i * (rh + gap), cy = y + rh / 2, top = i < q;
+      ctx.fillStyle = top ? rgba(mix(T.base, "#FFFFFF", 0.1), 0.28) : "rgba(255,255,255,0.07)"; roundRect(ctx, 40, y, W - 80, rh, 16); ctx.fill();
+      if (top) { ctx.strokeStyle = rgba(acc, 0.7); ctx.lineWidth = 2; roundRect(ctx, 40, y, W - 80, rh, 16); ctx.stroke(); }
+      ctx.save(); roundRect(ctx, 40, y, W - 80, rh, 16); ctx.clip(); ctx.fillStyle = T.base; ctx.fillRect(40, y, 10, rh); ctx.restore();
+      ctx.fillStyle = top ? acc : "rgba(255,255,255,0.75)"; font(ctx, rh * 0.42, 700); text(ctx, String(i + 1), 92, cy + rh * 0.15, "center");
+      const ls = rh * 0.7; logo(ctx, d.images.teams[i], r, 128 + ls / 2, cy, ls);
+      let xs = tableCells(ctx, r, W - 54, cy, rh, acc, top, true);
+      if (form) { formDots(ctx, r.form, xs - 10, cy, Math.min(13, rh * 0.15), true); xs -= 5 * Math.min(13, rh * 0.15) * 2.5 + 20; }
+      const nm = (r.name || "").toUpperCase(), nx = 144 + ls; ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, xs - nx - 10, Math.min(40, rh * 0.42), 700); text(ctx, nm, nx, cy + Math.min(40, rh * 0.42) * 0.36);
+    });
+    qualifyNote(ctx, W, F.bottom - 10, q, rows.length, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // The team on top gets a panel with its captain; the rest follow in compact rows.
+  function drawTableLeader(ctx, W, H, th, d) {
+    const rows = tableRows(d, H), F = posterFrame(ctx, W, H, d, "POINTS TABLE", tableLine(d), true), { acc, hy } = F, q = Math.min(d.table.qualify || 2, rows.length);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, F.line, W - 140, 24, 600); spaced(ctx, F.line, W / 2 + 4, 270 + hy, 8, "center");
+    const lead = rows[0]; if (!lead) return;
+    const T = teamTones(lead, d), cap = d.images.caps && d.images.caps[0], y0 = 310 + hy * 2, ph = H > 1500 ? 420 : 330, sk = 60;
+    ctx.save(); slant(ctx, 30, y0, W - 60, ph, sk); const g = ctx.createLinearGradient(0, y0, W, y0 + ph); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.35)); ctx.fillStyle = g; ctx.shadowColor = rgba(T.base, 0.5); ctx.shadowBlur = 30; ctx.fill(); ctx.restore();
+    ctx.save(); slant(ctx, 30, y0, W - 60, ph, sk); ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,0.08)"; font(ctx, ph * 1.05, 700); text(ctx, "1", W - 60, y0 + ph * 0.95, "right");
+    if (cap) bust(ctx, cap, W - 250, y0 + ph, ph * 1.0); else logo(ctx, d.images.teams[0], lead, W - 250, y0 + ph / 2, ph * 0.7);
+    ctx.restore();
+    ctx.fillStyle = acc; font(ctx, 24, 700, BODY); spaced(ctx, "TOP OF THE TABLE", 100, y0 + 60, 6);
+    const ls = Math.min(120, ph * 0.34); if (cap) logo(ctx, d.images.teams[0], lead, 90 + ls / 2, y0 + 80 + ls / 2, ls);
+    const nm = (lead.name || "").toUpperCase(), nx = cap ? 110 + ls : 90; ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 8; fit(ctx, nm, W - 420 - nx + 90, 66, 700); text(ctx, nm, nx, y0 + 80 + ls / 2 + 24); ctx.shadowBlur = 0;
+    ctx.fillStyle = "#FFFFFF"; font(ctx, ph * 0.3, 700); text(ctx, String(lead.pts), 84, y0 + ph - 40);
+    const pw = ctx.measureText(String(lead.pts)).width; ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, 24, 700, BODY);
+    spaced(ctx, "PTS", 100 + pw, y0 + ph - 44, 3); spaced(ctx, `P ${lead.p}  ·  W ${lead.w}  ·  NRR ${lead.nrr}`, 100 + pw, y0 + ph - 84, 2);
+    const rest = rows.slice(1), ry = y0 + ph + 40, n = Math.max(1, rest.length), gap = 8, rh = Math.min(H > 1500 ? 120 : n <= 5 ? 96 : 80, (F.bottom - 50 - ry - 30 - gap * (n - 1)) / n);
+    tableHead(ctx, W - 50, ry + 8, "rgba(255,255,255,0.55)");
+    rest.forEach((r, j) => {
+      const i = j + 1, Tr = teamTones(r, d), y = ry + 26 + j * (rh + gap), cy = y + rh / 2, top = i < q;
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; slant(ctx, 40, y, W - 80, rh, rh * 0.25); ctx.fill();
+      ctx.fillStyle = Tr.base; slant(ctx, 40, y, 110, rh, rh * 0.25); ctx.fill();
+      ctx.fillStyle = "#FFFFFF"; font(ctx, rh * 0.5, 700); text(ctx, String(i + 1), 100, cy + rh * 0.18, "center");
+      const ls2 = rh * 0.7; logo(ctx, d.images.teams[i], r, 170 + ls2 / 2, cy, ls2);
+      const xs = tableCells(ctx, r, W - 54, cy, rh, acc, top, true), nx2 = 186 + ls2, nm2 = (r.name || "").toUpperCase();
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, nm2, xs - nx2 - 10, Math.min(38, rh * 0.44), 700); text(ctx, nm2, nx2, cy + Math.min(38, rh * 0.44) * 0.36);
+    });
+    qualifyNote(ctx, W, F.bottom - 10, q, rows.length, acc);
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1973,6 +2075,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "table") { ({ L: drawTableLadder, G: drawTableGlass, T: drawTableLeader })[style](ctx, W, H, th, d); return cv; }
     if (kind === "versus") { ({ C: drawVsClash, F: drawVsFrames, S: drawVsStack })[style](ctx, W, H, th, d); return cv; }
     if (kind === "squad") { ({ R: drawSquadRoster, C: drawSquadCaptain, N: drawSquadNumbers })[style](ctx, W, H, th, d); return cv; }
     if (kind === "lineup") { ({ D: drawXiDuel, P: drawXiSplit, S: drawXiSheet })[style](ctx, W, H, th, d); return cv; }
