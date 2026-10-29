@@ -6,7 +6,7 @@
   if (!lg) return;
   const ui = CSA.ui, esc = ui.esc;
   const { sb, L, form, field, status, badge, errText } = lg;
-  const H = { results: null, query: "", recent: null, career: null, pick: null };
+  const H = { tq: "", tresults: null, results: null, query: "", recent: null, career: null, pick: null };
 
   const svg = (d, w) => `<svg width="${w || 24}" height="${w || 24}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const ICON = {
@@ -98,7 +98,7 @@
     return homeTop() + `<section class="wrap stack">
       ${ui.installBanner()}
       <div class="greet"><small>${greeting()}</small><b>${esc(firstName() || "Welcome")}</b></div>
-      <div class="quick-row">${quick("new", ICON.ball, "Score match")}${quick("t-new", ICON.trophy, "New tournament")}${quick("tm-create", ICON.team, "Create team")}${quick("find-tour", ICON.join, "Join tournament")}</div>
+      <div class="quick-row">${quick("new", ICON.ball, "Score match")}${quick("t-new", ICON.trophy, "New tournament")}${quick("tm-create", ICON.team, "Create team")}${quick("find-team", ICON.user, "Join team")}${quick("find-tour", ICON.join, "Join tournament")}</div>
       ${nudge}
       ${feed}
       ${mine.length ? section("Your tournaments", `<ul class="t-list">${mine.map(tourRow).join("")}</ul>`, (L.mine || []).length > 3 ? seeAll("tours") : "") : ""}
@@ -163,18 +163,48 @@
 
   // ---------- Teams ----------
 
+  // Search finds any team; with no search the user's own teams show.
+  function teamResults() {
+    if (H.tq.length < 2) {
+      if (!L.user) return signInCard("Make your own team", "Create your team, add your squad and enter tournaments.");
+      const list = L.myTeams == null ? `<p class="muted">Loading your teams…</p>`
+        : L.myTeams.length ? section("Your teams", `<ul class="t-list">${L.myTeams.map(teamRow).join("")}</ul>`)
+        : `<div class="empty-card"><span class="quick-icon">${svg(ICON.team)}</span><b>No teams yet</b><p class="muted">Create your own team, or search for your friends' team above and ask to join.</p></div>`;
+      return list + `<button class="btn btn-primary" data-act="tm-create">Create a team</button>`;
+    }
+    if (H.tresults === null) return `<p class="muted">Searching…</p>`;
+    if (!H.tresults.length) return `<p class="muted">No team matches “${esc(H.tq)}”. Ask the captain for the team's invite link.</p>`;
+    return `<ul class="t-list">${H.tresults.map((t) => {
+      const n = (t.team_players && t.team_players[0] ? t.team_players[0].count : 0);
+      return `<li><button class="t-row" data-act="my-team" data-id="${t.id}">${badge(t)}<span class="t-text"><b>${esc(t.name)}</b><small>${n} player${n === 1 ? "" : "s"}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
+    }).join("")}</ul>`;
+  }
+
   ui.screens.teams = () => {
     const plus = L.user ? `<button class="btn btn-small" data-act="tm-create">${svg(ICON.plus, 18)} Create</button>` : "";
-    if (!L.user) return top("Teams") + `<section class="wrap stack">${signInCard("Make your own team", "Create your team, add your squad and enter tournaments.")}</section>`;
-    const list = L.myTeams == null ? `<p class="muted">Loading your teams…</p>`
-      : L.myTeams.length ? `<ul class="t-list">${L.myTeams.map(teamRow).join("")}</ul>`
-      : `<div class="empty-card"><span class="quick-icon">${svg(ICON.team)}</span><b>No teams yet</b><p class="muted">Create your team, add your squad, then ask to join a tournament.</p></div>`;
     return top("Teams", plus) + `<section class="wrap stack">
-      ${list}
-      <button class="btn btn-primary" data-act="tm-create">Create a team</button>
-      <p class="muted small">Your captain can send you the team's invite link. Open it and you join the squad yourself.</p>
+      <label class="search">${svg(ICON.search, 20)}<input id="tm-search" type="search" data-tsearch="1" value="${esc(H.tq)}" placeholder="Find a team to join" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
+      <div id="tm-results" class="stack">${teamResults()}</div>
+      <p class="muted small">Open a team and tap Ask to join, and the captain accepts you. A captain's invite link adds you straight away.</p>
     </section>`;
   };
+
+  let teamTimer = null;
+  function searchTeams(raw) {
+    const q = raw.trim().replace(/[^\p{L}\p{N} _-]/gu, "").slice(0, 40);
+    H.tq = q; H.tresults = null;
+    clearTimeout(teamTimer);
+    const paint = () => { const el = document.getElementById("tm-results"); if (el) el.innerHTML = teamResults(); };
+    paint();
+    if (q.length < 2) return;
+    teamTimer = setTimeout(async () => {
+      const { data } = await sb.from("teams").select(lg.TEAM_COLS).or(`name.ilike.%${q}%,short_name.ilike.%${q}%`).order("name").limit(20);
+      if (H.tq !== q) return;
+      H.tresults = data || [];
+      paint();
+    }, 300);
+  }
+  document.addEventListener("input", (ev) => { if (ev.target.dataset.tsearch) searchTeams(ev.target.value); });
 
   function signInCard(title, text) {
     return `<div class="empty-card"><span class="quick-icon">${svg(ICON.user)}</span><b>${title}</b><p class="muted">${text}</p>
@@ -402,6 +432,11 @@
       if (d.tab === "home") lg.loadFeed();
       ui.go(d.tab);
       window.scrollTo(0, 0);
+    },
+    "find-team"() {
+      ui.actions.nav({ tab: "teams" });
+      const el = document.getElementById("tm-search");
+      if (el) el.focus();
     },
     "find-tour"() {
       ui.actions.nav({ tab: "tours" });

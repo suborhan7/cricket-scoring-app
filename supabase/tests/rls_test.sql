@@ -336,5 +336,30 @@ do $$ begin
   if (select jersey_no from public.players where id = '30000000-0000-0000-0000-000000000012') <> 11 then raise exception 'own details were not carried over'; end if;
 end $$;
 
+-- Team join requests: Gopal asks to join Farhan XI; a stranger can't answer, the captain accepts.
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+do $$ begin
+  if public.request_team_join('20000000-0000-0000-0000-00000000000e', 'I bowl spin') <> 'sent' then raise exception 'team request not sent'; end if;
+  if public.request_team_join('20000000-0000-0000-0000-00000000000e') <> 'pending' then raise exception 'second team request should wait'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if exists (select 1 from public.team_requests) then raise exception 'strangers must not see team requests'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000f');
+do $$ declare r uuid; begin
+  select id into r from public.team_requests where team_id = '20000000-0000-0000-0000-00000000000e';
+  if r is null then raise exception 'captain cannot see the team request'; end if;
+  if not exists (select 1 from public.notifications where kind = 'team_request') then raise exception 'captain got no team request alert'; end if;
+  perform public.answer_team_request(r, true);
+  if not exists (select 1 from public.team_players where team_id = '20000000-0000-0000-0000-00000000000e' and player_id = '30000000-0000-0000-0000-000000000012') then raise exception 'accepted player not in squad'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+do $$ begin
+  perform public.request_team_join('20000000-0000-0000-0000-00000000000e');
+  raise exception 'a squad member could ask again';
+exception when unique_violation then null;
+end $$;
+
 reset role;
 \echo 'All security checks passed'

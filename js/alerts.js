@@ -74,7 +74,7 @@
   ui.screens.alerts = () => {
     const list = A.list || [];
     const rows = list.map((n) => `<li><button class="t-row alert-row ${n.read_at ? "" : "unread"}" data-act="alert-open" data-id="${n.id}">
-        <span class="alert-icon">${{ result: "★", milestone: "▲", join_request: "+", join_answer: "✓", team_join: "+" }[n.kind] || "•"}</span>
+        <span class="alert-icon">${{ result: "★", milestone: "▲", join_request: "+", join_answer: "✓", team_join: "+", team_request: "+", team_answer: "✓" }[n.kind] || "•"}</span>
         <span class="t-text"><b>${esc(n.title)}</b><small>${esc(n.body)}</small><small class="alert-when">${ago(n.created_at)}</small></span>
         ${n.read_at ? "" : `<span class="dot-new" aria-label="New"></span>`}</button></li>`).join("");
     const body = A.list == null ? `<p class="muted">Loading…</p>`
@@ -100,7 +100,7 @@
       if (!n.read_at) { n.read_at = new Date().toISOString(); sb.from("notifications").update({ read_at: n.read_at }).eq("id", n.id).then(() => {}); }
       const d2 = n.data || {};
       // Joining alerts open the tournament's teams or the team; card alerts open the card.
-      if (n.kind === "team_join") return CSA.squad.openTeam(d2.team, "tab");
+      if (n.kind === "team_join" || n.kind === "team_request" || n.kind === "team_answer") return CSA.squad.openTeam(d2.team, "tab");
       if (n.kind === "join_request" || n.kind === "join_answer") { L.tour = null; return lg.openTour(d2.tournament, "teams"); }
       if (CSA.studio) CSA.studio.openAlert(d2);
     },
