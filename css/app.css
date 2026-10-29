@@ -407,3 +407,44 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .toast-act { color: var(--on-turf); }
 .watch-col { flex-direction: column; align-items: stretch; }
 .watch-col p { margin: 0; }
+
+/* Scoring screen: everything on one phone screen, no scrolling while scoring */
+.score-screen { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.score-screen .bar { position: static; }
+.score-screen .bar h1 { font-size: 1.35rem; }
+.score-screen .scoreboard { padding-top: 2px; padding-bottom: 10px; }
+.score-screen .sb-top { font-size: 0.92rem; }
+.score-screen .sb-score { font-size: 3.1rem; }
+.score-screen .sb-overs { font-size: 1.6rem; }
+.score-screen .sb-overs small { font-size: 0.95rem; }
+.score-screen .sb-sub { font-size: 0.9rem; min-height: 1.2em; }
+.score-body { flex: 1; width: 100%; padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
+.score-body .prow { padding: 6px 12px; grid-template-columns: 1fr auto auto; align-items: baseline; }
+.score-body .prow .pname { font-size: 0.98rem; }
+.score-body .prow .pfig b { font-size: 1.15rem; }
+.score-body .prow .pmeta { grid-column: auto; grid-row: 1; grid-column-start: 2; font-size: 0.75rem; text-align: right; padding-right: 8px; }
+.score-body .over { padding: 6px 12px; }
+.score-body .ball { min-width: 28px; height: 28px; border-radius: 14px; font-size: 0.8rem; }
+.score-body .keypad { margin-top: auto; gap: 6px; }
+.score-body .key { min-height: clamp(50px, 8.2dvh, 68px); border-radius: 12px; }
+.score-body .key-run { font-size: 1.9rem; }
+.score-body .key-out { font-size: 1.5rem; }
+.score-body .key-x { font-size: 0.95rem; line-height: 1.15; }
+.score-body .tools .btn-tool { min-height: 44px; padding: 6px 8px; }
+.score-body .pick, .score-body .result, .score-body .watch { margin-top: 4px; }
+/* Spare height goes to the keypad: bigger keys on taller phones, never a scroll. */
+.score-body .keypad { flex: 1 1 auto; max-height: 340px; grid-auto-rows: 1fr; align-content: stretch; }
+.score-body .key { min-height: 52px; height: auto; }
+.score-screen .sb-score { font-size: clamp(2.8rem, 7dvh, 3.8rem); }
+@media (max-height: 700px) {
+  .score-screen .bar { padding-top: calc(4px + env(safe-area-inset-top, 0px)); padding-bottom: 4px; }
+  .score-screen .sb-top { display: none; }
+  .score-body { padding-top: 6px; gap: 6px; }
+  .score-body .prow, .score-body .over { padding-top: 3px; padding-bottom: 3px; }
+  .score-body .key { min-height: 44px; }
+  .score-body .key-run small { display: none; }
+  .score-body .tools .btn-tool { min-height: 40px; }
+}
+.score-body .pick-title { font-size: 1.3rem; }
+.score-body .btn-pick { min-height: 44px; padding: 8px 12px; }
+.score-body .pick-grid { gap: 6px; }
