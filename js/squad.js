@@ -44,19 +44,22 @@
     S.team = { id, from, loading: true };
     ui.go("team", { id });
     const inTour = from === "tour" && L.tour;
-    const [team, squad, group, tours, reqs] = await Promise.all([
+    const [team, squad, group, tours, reqs, asks] = await Promise.all([
       sb.from("teams").select("*").eq("id", id).single(),
       sb.from("team_players").select("joined_at, players(*)").eq("team_id", id).order("joined_at"),
       inTour ? sb.from("tournament_teams").select("group_name").eq("tournament_id", L.tour.id).eq("team_id", id).maybeSingle() : Promise.resolve({ data: null }),
       sb.from("tournament_teams").select("tournaments(id, name, short_name, handle, kind, overs_per_side, logo_path, primary_color, secondary_color)").eq("team_id", id),
       L.user ? sb.from("join_requests").select("id, status, tournaments(id, name, short_name)").eq("team_id", id).eq("status", "pending") : Promise.resolve({ data: [] }),
+      // The rules return every request to a team its captain runs, and only their own to anyone else.
+      L.user ? sb.from("team_requests").select("id, note, created_at, players(id, full_name, photo_path, role, batting_style, bowling_style)").eq("team_id", id).eq("status", "pending").order("created_at") : Promise.resolve({ data: [] }),
     ]);
     if (!S.team || S.team.id !== id) return;
     const err = team.error || squad.error;
     S.team = { id, from, loading: false, error: err ? errText(err) : "", t: team.data, group: group.data && group.data.group_name,
       players: (squad.data || []).map((r) => r.players).filter(Boolean),
       tours: (tours.data || []).map((r) => r.tournaments).filter(Boolean),
-      pending: (reqs.data || []).map((r) => r.tournaments).filter(Boolean) };
+      pending: (reqs.data || []).map((r) => r.tournaments).filter(Boolean),
+      asks: asks.error ? [] : (asks.data || []).filter((r) => r.players) };
     lg.rerender("team");
   }
 
@@ -79,8 +82,16 @@
         <button class="action" data-act="team-edit">${ICON.edit}<span>Edit team</span></button></div>` : "";
     const tours = T.tours.length ? `<h2 class="eyebrow">Tournaments</h2><ul class="t-list">${T.tours.map((x) => `<li><button class="t-row" data-act="t-open" data-id="${x.id}">${badge(x)}
         <span class="t-text"><b>${esc(x.name)}</b><small>${x.handle ? `@${esc(x.handle)} · ` : ""}${x.kind === "series" ? "Series" : "Tournament"}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>` : "";
+    const asks = manage && T.asks.length ? `<h2 class="eyebrow">Asking to join</h2><ul class="t-list">${T.asks.map((r) => `<li class="t-row req-row">${avatar(r.players)}
+        <span class="t-text"><b>${esc(r.players.full_name)}</b><small>${esc(playerLine(r.players) || "Player")}${r.note ? ` · “${esc(r.note)}”` : ""}</small></span>
+        <span class="req-btns"><button class="btn btn-small" data-act="treq-answer" data-id="${r.id}" data-ok="0">Decline</button><button class="btn btn-small btn-primary" data-act="treq-answer" data-id="${r.id}" data-ok="1">Accept</button></span></li>`).join("")}</ul>` : "";
+    const inSquad = L.me && T.players.some((p) => p.id === L.me.id);
+    const join = manage || inSquad ? ""
+      : L.me && T.asks.some((r) => r.players.id === L.me.id) ? `<p class="note">Waiting for the captain to accept you.</p>`
+      : `<div class="card stack-s join-card"><b>Play for ${esc(t.name)}?</b><p class="muted small">Ask to join, and the captain adds you to the squad.</p>
+          <button class="btn btn-primary" data-act="team-ask">Ask to join</button></div>`;
     const pending = manage && T.pending.length ? `<p class="note">Waiting for approval: ${T.pending.map((x) => esc(x.short_name || x.name)).join(", ")}</p>` : "";
-    return head(esc(t.short_name)) + hero + `<section class="wrap stack">${tools}${pending}
+    return head(esc(t.short_name)) + hero + `<section class="wrap stack">${tools}${join}${asks}${pending}
       <h2 class="eyebrow">Squad</h2>
       ${rows ? `<ul class="people">${rows}</ul>` : `<p class="muted">No players yet.${manage ? " Send the invite link and players add themselves." : ""}</p>`}
       ${tours}</section>`;
@@ -295,6 +306,20 @@
       const { data, error } = await sb.rpc("team_invite_code", { team: t.id, fresh: false });
       if (error) return ui.toast(/function|schema/.test(error.message) ? "Invite links need a database update first." : errText(error));
       lg.shareLink(`Join ${t.name}`, `Join ${t.name} on ${ui.APP}:`, `${location.origin}${location.pathname}#/tmjoin/${data}`, "Invite link copied. Send it in your team group.");
+    },
+    async "team-ask"() {
+      if (!L.user) { lg.form("account", { mode: "up" }).note = "Sign in or create an account to join a team."; return ui.go("account"); }
+      if (!L.me) { ui.toast("Set up your player profile first, then ask to join."); return ui.actions.nav({ tab: "profile" }); }
+      const { data, error } = await sb.rpc("request_team_join", { team: S.team.id, note: null });
+      if (error) return ui.toast(/function|schema/.test(error.message) ? "Joining teams needs a database update first." : error.message);
+      ui.toast(data === "pending" ? "Your request is already waiting for the captain." : "Request sent. The captain gets an alert.");
+      openTeam(S.team.id);
+    },
+    async "treq-answer"(d) {
+      const { error } = await sb.rpc("answer_team_request", { req: d.id, accept: d.ok === "1" });
+      if (error) return ui.toast(errText(error));
+      ui.toast(d.ok === "1" ? "Added to the squad" : "Request declined");
+      openTeam(S.team.id);
     },
     "team-join-tour"() {
       L.joinTeam = S.team.id;
