@@ -18,7 +18,12 @@
   const MILESTONE_STYLES = [["S", "Spotlight"], ["P", "Split"]];
   // Player of the match: Halo first, then the milestone looks.
   const POTM_STYLES = [["H", "Halo"], ["S", "Spotlight"], ["P", "Split"]];
-  const stylesFor = (kind) => kind === "milestone" ? MILESTONE_STYLES : kind === "potm" ? POTM_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+  // Result: Face-off first, then Scoreline and Hero (the player of the match on the winners' stage).
+  const RESULT_STYLES = [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]];
+  // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
+  const PERF = new Set(["batperf", "bowlperf"]);
+  const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
+    : kind === "result" ? RESULT_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -814,6 +819,7 @@
   const MILESTONE = {
     fifty: { word: "FIFTY", mark: "50" }, hundred: { word: "HUNDRED", mark: "100" },
     threefor: { word: "THREE-FOR", mark: "3W" }, fivefor: { word: "FIVE-FOR", mark: "5W" },
+    batting: { word: "BATTING", k2: "FIGURES" }, bowling: { word: "BOWLING", k2: "FIGURES" },
   };
 
   // One shape for every player card.
@@ -927,18 +933,22 @@
     let c = null;
     if (J && img) try { c = J.pickJerseyColors(img); } catch (e) { c = null; }
     if (!c) c = { primary: d.player.c1 || d.tournament.c1 || "#0F7A45", secondary: d.player.c2 || d.tournament.c2 || "#111111" };
-    if (!J) return { base: c.primary, deep: mix(c.primary, "#000000", 0.85), mid: mix(c.primary, "#000000", 0.55), glow: mix(c.primary, "#FFFFFF", 0.5), accent: "#F5C542", mvp: "#F5C542" };
-    return J.vividPalette(c.primary, c.secondary);
+    return paletteOf(c.primary, c.secondary);
+  }
+  function paletteOf(primary, secondary) {
+    const J = root.CSA && root.CSA.jersey;
+    if (!J) return { base: primary, deep: mix(primary, "#000000", 0.85), mid: mix(primary, "#000000", 0.55), glow: mix(primary, "#FFFFFF", 0.5), accent: "#F5C542", mvp: "#F5C542" };
+    return J.vividPalette(primary, secondary);
   }
 
   // What a milestone card says, for batting and bowling alike.
   function milestoneText(d) {
     const m = d.milestone, M = MILESTONE[m.kind], words = d.player.name.trim().split(/\s+/);
     return m.batting
-      ? { word: M.word, k2: "UP!", mark: M.mark, big: String(m.runs), star: !!m.notOut, sub: `OFF ${m.balls} BALLS`, subShort: `${m.balls} BALLS`,
+      ? { word: M.word, k2: M.k2 || "UP!", mark: M.mark || String(m.runs), big: String(m.runs), star: !!m.notOut, sub: `OFF ${m.balls} BALLS`, subShort: `${m.balls} BALLS`,
         stats: [[m.fours, m.fours === 1 ? "Four" : "Fours"], [m.sixes, m.sixes === 1 ? "Six" : "Sixes"], [m.sr, "Strike rate"]],
         first: words.length > 1 ? words.slice(0, -1).join(" ") : "", last: words[words.length - 1] }
-      : { word: M.word, k2: "TAKEN!", mark: M.mark, big: `${m.wickets}/${m.runs}`, star: false, sub: `IN ${m.overs} OVERS`, subShort: `${m.overs} OVERS`,
+      : { word: M.word, k2: M.k2 || "TAKEN!", mark: M.mark || `${m.wickets}W`, big: `${m.wickets}/${m.runs}`, star: false, sub: `IN ${m.overs} OVERS`, subShort: `${m.overs} OVERS`,
         stats: [[m.overs, "Overs"], [m.maidens, m.maidens === 1 ? "Maiden" : "Maidens"], [m.econ, "Economy"]],
         first: words.length > 1 ? words.slice(0, -1).join(" ") : "", last: words[words.length - 1] };
   }
@@ -1050,6 +1060,10 @@
 
   // Halo: the player in the middle of a ring in the jersey colour, light rays behind, a ribbon,
   // the name and one row of figures (batting, bowling or fielding, then MVP points).
+  // The title on a player-of-the-match style card; an all-round performance card brings its own.
+  const POTM_HEADING = { text: "PLAYER OF THE MATCH", lines: ["PLAYER", "OF THE", "MATCH"], ghost: "POTM" };
+  const headingOf = (d) => d.heading || POTM_HEADING;
+
   function drawHalo(ctx, W, H, th, d) {
     const P = jerseyPalette(d), dy = H - 1350, acc = P.mvp || P.accent, BG = mix(P.deep, "#000000", 0.3), p = d.potm;
     const cy = 560 + dy * 0.45, r = 330 + dy * 0.12, foot = 980 + dy * 0.75;
@@ -1080,12 +1094,12 @@
     // Ribbon, name, result.
     const y = H - 400;
     ctx.fillStyle = acc; ctx.beginPath(); ctx.moveTo(W / 2 - 250, y); ctx.lineTo(W / 2 + 250, y); ctx.lineTo(W / 2 + 228, y + 54); ctx.lineTo(W / 2 - 228, y + 54); ctx.fill();
-    ctx.fillStyle = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF"; font(ctx, 26, 700, BODY); spaced(ctx, "PLAYER OF THE MATCH", W / 2, y + 37, 7, "center");
+    ctx.fillStyle = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF"; font(ctx, 26, 700, BODY); fit(ctx, headingOf(d).text, 440, 26, 700, BODY, 16); spaced(ctx, headingOf(d).text, W / 2, y + 37, 7, "center");
     ctx.fillStyle = "#FFFFFF"; fit(ctx, d.player.name.toUpperCase(), W - 120, 96, 700); text(ctx, d.player.name.toUpperCase(), W / 2, y + 154, "center");
     ctx.fillStyle = "rgba(255,255,255,0.7)"; fit(ctx, p.result || p.line || "", W - 140, 24, 500, BODY, 14); text(ctx, p.result || p.line || "", W / 2, y + 194, "center");
     // Figures: the main tiles (runs, wickets, catches), a rate if there is only one, then MVP points.
     const rate = new Set(["Strike rate", "Economy", "MVP points"]), tiles = p.tiles || [];
-    const main = tiles.filter((t) => !rate.has(t.k)).slice(0, 2);
+    const main = tiles.filter((t) => !rate.has(t.k)).slice(0, p.pts != null ? 2 : 3);
     if (main.length < 2) main.push(...tiles.filter((t) => t.k === "Strike rate" || t.k === "Economy").slice(0, 2 - main.length));
     const cols = main.map((t) => [t.v + (t.s ? " " + t.s : ""), t.k.toUpperCase()]).concat(p.pts != null ? [[String(p.pts), "MVP POINTS"]] : []);
     const cw = 300, x0 = W / 2 - (cols.length * cw) / 2;
@@ -1122,7 +1136,7 @@
       ctx.fillStyle = l; ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + w, 0); ctx.lineTo(x0 + w + 260, H); ctx.lineTo(x0 + 120, H); ctx.fill();
     }
     ctx.restore();
-    ctx.fillStyle = rgba(P.glow, 0.09); font(ctx, 760, 700); text(ctx, "MVP", 720, 1000 + dy * 0.7, "center");
+    ctx.fillStyle = rgba(P.glow, 0.09); font(ctx, 760, 700); text(ctx, headingOf(d).ghost === "POTM" ? "MVP" : headingOf(d).ghost, 720, 1000 + dy * 0.7, "center");
     player(ctx, d.images.player, { cx: 770, bottom: H, h: d.images.player ? 1120 + dy * 0.85 : 760 + dy * 0.4, w: d.images.player ? 640 : 520 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
     g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, rgba(BG, 0.94)); g.addColorStop(0.45, rgba(BG, 0.6)); g.addColorStop(0.65, rgba(BG, 0));
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -1133,7 +1147,7 @@
     ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 163, 128, 2);
     sponsorRow(ctx, d, W - 60, 76, "right", "rgba(255,255,255,0.55)");
     const y = dy * 0.5;
-    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, "PLAYER OF THE MATCH", 64, 310 + y, 8);
+    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, headingOf(d).text, 64, 310 + y, 8);
     if (first) { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, first.toUpperCase(), 560, 46, 500); text(ctx, first.toUpperCase(), 62, 410 + y); }
     ctx.fillStyle = "#FFFFFF"; fit(ctx, last.toUpperCase(), 600, 140, 700); text(ctx, last.toUpperCase(), 56, 540 + y);
     let ly = 700 + y;
@@ -1165,15 +1179,16 @@
     player(ctx, d.images.player, { cx: 780, bottom: H - 150, h: d.images.player ? 1080 + dy * 0.8 : 720 + dy * 0.4, w: d.images.player ? 600 : 480 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
     ctx.save(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(490, 0); ctx.lineTo(400, H); ctx.lineTo(0, H); ctx.closePath();
     g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, P.base); g.addColorStop(1, P.deep); ctx.fillStyle = g; ctx.fill(); ctx.clip();
-    ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.save(); ctx.translate(350, H - 50); ctx.rotate(-Math.PI / 2); fit(ctx, "POTM", H - 100, 520, 700); ctx.fillText("POTM", 0, 0); ctx.restore();
+    ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.save(); ctx.translate(350, H - 50); ctx.rotate(-Math.PI / 2); fit(ctx, headingOf(d).ghost, H - 100, 520, 700); ctx.fillText(headingOf(d).ghost, 0, 0); ctx.restore();
     ctx.restore();
     ctx.fillStyle = acc; ctx.beginPath(); ctx.moveTo(490, 0); ctx.lineTo(506, 0); ctx.lineTo(416, H); ctx.lineTo(400, H); ctx.fill();
     tournamentMark(ctx, d, 60, 60, 80);
     ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 380, 20, 700, BODY, 12); spaced(ctx, d.tournament.name.toUpperCase(), 60, 186, 2);
     ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 60, 214, 2);
     const y = dy * 0.5;
-    ctx.fillStyle = "#FFFFFF"; font(ctx, 86, 700); text(ctx, "PLAYER", 56, 360 + y); text(ctx, "OF THE", 56, 446 + y);
-    ctx.fillStyle = acc; text(ctx, "MATCH", 56, 532 + y);
+    const hl = headingOf(d).lines;
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, hl[0], 380, 86, 700); text(ctx, hl[0], 56, 360 + y); fit(ctx, hl[1], 380, 86, 700); text(ctx, hl[1], 56, 446 + y);
+    ctx.fillStyle = acc; fit(ctx, hl[2], 380, 86, 700); text(ctx, hl[2], 56, 532 + y);
     let ly = 660 + y;
     const rule = (yy) => { ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(60, yy, 320, 2); };
     for (const l of potmLines(p)) {
@@ -1197,6 +1212,148 @@
     grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Result cards: Face-off, Scoreline and Hero ----------
+
+  // Who won and by how much, from the result line ("Dhaka Tigers won by 24 runs").
+  function resultText(d) {
+    const r = d.result, win = r.teams.find((t) => t.won) || null, m = /won by (.+)$/i.exec(r.text || "");
+    const P = win ? paletteOf(win.c1 || "#0F7A45", win.c2 || "#111111") : paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542");
+    return { r, win, margin: win && m ? m[1].replace(/\s*\(.*\)$/, "") : "", P, acc: P.mvp || P.accent };
+  }
+  // Tournament logo, name and match on the left; sponsors on the right.
+  function stageHead(ctx, W, d) {
+    tournamentMark(ctx, d, 50, 50, 80);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 420, 24, 700); text(ctx, d.tournament.name.toUpperCase(), 150, 86);
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 17, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 151, 114, 2);
+    sponsorRow(ctx, d, W - 50, 66, "right", "rgba(255,255,255,0.55)");
+  }
+  // Top scorer and best bowling in a row at y.
+  function performers(ctx, d, y, acc) {
+    const r = d.result;
+    [["TOP SCORER", r.topBat], ["BEST BOWLING", r.topBowl]].filter(([, x]) => x).forEach(([l, x], i) => {
+      const X = 56 + i * 500;
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 16, 700, BODY); spaced(ctx, l, X, y, 3);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, x.name.toUpperCase(), 300, 34, 600); text(ctx, x.name.toUpperCase(), X, y + 46);
+      const nw = ctx.measureText(x.name.toUpperCase()).width;
+      ctx.fillStyle = acc; font(ctx, 34, 700); text(ctx, x.figures, X + nw + 14, y + 46);
+    });
+  }
+  const appMark = (ctx, W, y) => { ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 15, 700, BODY); spaced(ctx, "CRICPULSE", W - 50, y, 4, "right"); };
+  const teamLogo = (ctx, d, i, cx, cy, size) => logo(ctx, d.images.teams[i], d.result.teams[i], cx, cy, size);
+
+  // Face-off: each team owns half the card in its own colours, cut on a diagonal; the losing half is dimmed.
+  function drawFaceoff(ctx, W, H, th, d) {
+    const { r, win, margin, acc } = resultText(d), [a, b] = r.teams, dy = H - 1350;
+    const yl = 760 + dy * 0.45, yr = 560 + dy * 0.45, seam = (x) => yl + ((yr - yl) * x) / W;
+    const halves = [[a, [[0, 0], [W, 0], [W, yr], [0, yl]]], [b, [[0, yl], [W, yr], [W, H], [0, H]]]];
+    halves.forEach(([t, pts], i) => {
+      if (!t) return;
+      const P = paletteOf(t.c1 || "#0F7A45", t.c2 || "#111111");
+      ctx.save(); ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.clip();
+      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, P.base); g.addColorStop(1, mix(P.deep, "#000000", 0.4)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      if (win && !t.won) { ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(0, 0, W, H); }
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; fit(ctx, t.short || "", W - 200, 420, 700); text(ctx, t.short || "", i ? 40 : W - 40, i ? H - 260 : yr, i ? "left" : "right");
+      ctx.restore();
+    });
+    ctx.strokeStyle = acc; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(0, yl); ctx.lineTo(W, yr); ctx.stroke();
+    stageHead(ctx, W, d);
+    const row = (t, i, lx, y, align) => {
+      teamLogo(ctx, d, i, lx, y, 230);
+      const x0 = align === "left" ? lx + 150 : lx - 150, dim = win && !t.won;
+      ctx.fillStyle = dim ? "rgba(255,255,255,0.75)" : "#FFFFFF"; fit(ctx, t.name.toUpperCase(), 520, 50, 700); text(ctx, t.name.toUpperCase(), x0, y - 40, align);
+      fit(ctx, t.score, 560, 140, 700); text(ctx, t.score, x0, y + 100, align);
+      ctx.fillStyle = "rgba(255,255,255,0.65)"; font(ctx, 22, 600, BODY); spaced(ctx, t.overs ? `${t.overs} OVERS` : "", x0, y + 140, 3, align);
+    };
+    if (a) row(a, 0, 190, 360 + dy * 0.15, "left");
+    if (b) row(b, 1, W - 190, 950 + dy * 0.7, "right");
+    // The result on the seam.
+    ctx.save(); ctx.translate(W / 2, seam(W / 2)); ctx.rotate(Math.atan2(yr - yl, W));
+    const label = (win && margin ? `${win.short || win.name} won by ${margin}` : r.text).toUpperCase();
+    fit(ctx, label, W - 260, 40, 700); const lw = ctx.measureText(label).width + 100;
+    ctx.fillStyle = acc; ctx.beginPath(); ctx.moveTo(-lw / 2 + 20, -36); ctx.lineTo(lw / 2 + 20, -36); ctx.lineTo(lw / 2 - 20, 36); ctx.lineTo(-lw / 2 - 20, 36); ctx.fill();
+    ctx.fillStyle = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF"; text(ctx, label, 0, 14, "center");
+    ctx.restore();
+    const g = ctx.createLinearGradient(0, H - 200, 0, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.7)"); ctx.fillStyle = g; ctx.fillRect(0, H - 200, W, 200);
+    performers(ctx, d, H - 100, acc);
+    appMark(ctx, W, H - 20);
+    grain(ctx, W, H, 0.05);
+  }
+
+  // Scoreline: the winners' colours; the margin as the headline; both logos big with the scores under them.
+  function drawScoreline(ctx, W, H, th, d) {
+    const { r, win, margin, P, acc } = resultText(d), BG = mix(P.deep, "#000000", 0.35), dy = H - 1350;
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(W / 2, 760 + dy * 0.5, 50, W / 2, 760 + dy * 0.5, 820); g.addColorStop(0, rgba(P.base, 0.85)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 2; for (let i = -H; i < W; i += 30) { ctx.beginPath(); ctx.moveTo(i, H); ctx.lineTo(i + H * 0.5, 0); ctx.stroke(); } ctx.restore();
+    stageHead(ctx, W, d);
+    const y0 = dy * 0.3;
+    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, "RESULT", 56, 250 + y0, 12); ctx.fillRect(56, 268 + y0, 70, 6);
+    if (win && margin) {
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, win.name.toUpperCase(), W - 110, 96, 700); text(ctx, win.name.toUpperCase(), 52, 380 + y0);
+      ctx.fillStyle = acc; fit(ctx, `WON BY ${margin}`.toUpperCase(), W - 110, 120, 700); text(ctx, `WON BY ${margin}`.toUpperCase(), 52, 500 + y0);
+    } else { ctx.fillStyle = "#FFFFFF"; fit(ctx, r.text.toUpperCase(), W - 110, 120, 700); text(ctx, r.text.toUpperCase(), 52, 460 + y0); }
+    const cy = 740 + dy * 0.6;
+    r.teams.forEach((t, i) => {
+      const cx = i ? W - 270 : 270, dim = win && !t.won;
+      ctx.save(); ctx.globalAlpha = dim ? 0.55 : 1;
+      ctx.fillStyle = t.won ? rgba(acc, 0.18) : "rgba(255,255,255,0.06)"; ctx.beginPath(); ctx.arc(cx, cy, 170, 0, Math.PI * 2); ctx.fill();
+      teamLogo(ctx, d, i, cx, cy, 250); ctx.restore();
+      ctx.fillStyle = dim ? "rgba(255,255,255,0.7)" : "#FFFFFF"; fit(ctx, t.score, 420, 110, 700); text(ctx, t.score, cx, cy + 270, "center");
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 20, 600, BODY); spaced(ctx, `${t.short || ""}${t.overs ? ` · ${t.overs} OV` : ""}`, cx, cy + 308, 3, "center");
+      if (t.won) { ctx.fillStyle = acc; ctx.beginPath(); roundRect(ctx, cx - 50, cy + 328, 100, 34, 17); ctx.fill(); ctx.fillStyle = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF"; font(ctx, 18, 700, BODY); spaced(ctx, "WON", cx, cy + 352, 4, "center"); }
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 40, 500); text(ctx, "V", W / 2, cy + 20, "center");
+    ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.fillRect(50, H - 200, W - 100, 2);
+    performers(ctx, d, H - 154, acc);
+    appMark(ctx, W, H - 40);
+    grain(ctx, W, H, 0.05);
+  }
+
+  // Hero: the player of the match on the winners' stage; the margin on the left; the scoreboard below.
+  function drawResultHero(ctx, W, H, th, d) {
+    const { r, win, margin, P, acc } = resultText(d), BG = mix(P.deep, "#000000", 0.35), dy = H - 1350, foot = 880 + dy * 0.75;
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(760, 560 + dy * 0.4, 40, 760, 560 + dy * 0.4, 900); g.addColorStop(0, rgba(mix(P.base, "#FFFFFF", 0.08), 0.95)); g.addColorStop(0.55, rgba(P.deep, 0.7)); g.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const wi = r.teams.indexOf(win);
+    if (wi >= 0) { ctx.save(); ctx.globalAlpha = 0.1; teamLogo(ctx, d, wi, 760, 520 + dy * 0.4, 700); ctx.restore(); }
+    const pl = d.player || {};
+    if (d.player || d.images.player) player(ctx, d.images.player, { cx: 830, bottom: foot, h: d.images.player ? 780 + dy * 0.6 : 560, w: d.images.player ? 540 : 420 }, { c1: pl.c1, c2: pl.c2 }, pl.no);
+    g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, rgba(BG, 0.95)); g.addColorStop(0.45, rgba(BG, 0.6)); g.addColorStop(0.65, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    g = ctx.createLinearGradient(0, foot - 240, 0, foot - 40); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG); ctx.fillStyle = g; ctx.fillRect(0, foot - 240, W, 200);
+    ctx.fillStyle = BG; ctx.fillRect(0, foot - 40, W, H - foot + 40);
+    stageHead(ctx, W, d);
+    const y0 = dy * 0.3;
+    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, "FULL TIME", 56, 250 + y0, 12);
+    if (win && margin) {
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, win.name.toUpperCase(), 600, 80, 700); text(ctx, win.name.toUpperCase(), 52, 350 + y0);
+      font(ctx, 80, 500); text(ctx, "WON BY", 52, 440 + y0);
+      ctx.fillStyle = acc; fit(ctx, margin.toUpperCase(), 540, 150, 700); text(ctx, margin.toUpperCase(), 48, 590 + y0);
+    } else { ctx.fillStyle = "#FFFFFF"; for (const [k, l] of wrap(ctx, r.text.toUpperCase(), 560, 3).entries()) { fit(ctx, l, 560, 110, 700); text(ctx, l, 52, 380 + y0 + k * 120); } }
+    r.teams.forEach((t, i) => {
+      const y = foot + 20 + i * 150;
+      ctx.fillStyle = t.won ? mix(BG, acc, 0.16) : mix(BG, "#FFFFFF", 0.06); ctx.beginPath(); roundRect(ctx, 40, y - 70, W - 80, 128, 20); ctx.fill();
+      if (t.won) { ctx.fillStyle = acc; ctx.fillRect(40, y - 70, 8, 128); }
+      teamLogo(ctx, d, i, 120, y - 6, 96);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, t.name.toUpperCase(), 440, 40, 700); text(ctx, t.name.toUpperCase(), 196, y + 4);
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 19, 600, BODY); spaced(ctx, t.overs ? `${t.overs} OVERS` : "", 198, y + 36, 2);
+      ctx.fillStyle = t.won ? acc : "#FFFFFF"; fit(ctx, t.score, 300, 76, 700); text(ctx, t.score, W - 90, y + 22, "right");
+    });
+    if (r.captain) {
+      ctx.fillStyle = acc; font(ctx, 16, 700, BODY); spaced(ctx, "CAPTAIN", W - 60, foot - 112, 4, "right");
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, r.captain.toUpperCase(), 420, 34, 600); text(ctx, r.captain.toUpperCase(), W - 60, foot - 72, "right");
+    }
+    const pm = r.potm;
+    if (pm) {
+      const y = H - 144;
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 16, 700, BODY); spaced(ctx, "PLAYER OF THE MATCH", 56, y, 3);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, pm.name.toUpperCase(), 520, 36, 600); text(ctx, pm.name.toUpperCase(), 56, y + 46);
+      const nw = ctx.measureText(pm.name.toUpperCase()).width;
+      ctx.fillStyle = acc; font(ctx, 36, 700); text(ctx, pm.figures || "", 56 + nw + 16, y + 46);
+    } else performers(ctx, d, H - 144, acc);
+    appMark(ctx, W, H - 40);
+    grain(ctx, W, H, 0.05);
+  }
+
   const DRAW = {
     schedule: drawSchedule, groups: drawGroups, lineup: drawLineup, versus: drawVersus, result: drawResult, table: drawTable,
     squad: drawSquad, leaders: drawLeaders, target: drawTarget, champions: drawChampions,
@@ -1216,8 +1373,9 @@
     d.images = { tournament, player: playerImg, sponsors, teams };
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
-    if (kind === "milestone") { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
-    if (kind === "potm") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
+    if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "potm" || kind === "allround") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
     const K = KITS[style](th, W, H, d).use(ctx);
     if (HERO.has(kind)) (style === "B" ? drawHeroB : drawHeroA)(ctx, W, H, th, Object.assign(d, { kind }), K);
     else DRAW[kind](ctx, W, H, th, d, K);
@@ -1236,6 +1394,14 @@
       const what = m.batting
         ? `${M.word}! ${d.player.name} brings up ${m.kind === "hundred" ? "a hundred" : "fifty"} for ${d.player.team} against ${d.opponent}: ${m.runs}${m.notOut ? "*" : ""} off ${m.balls} balls with ${m.fours} fours and ${m.sixes} sixes.`
         : `${M.word}! ${d.player.name} takes ${m.wickets} for ${m.runs} for ${d.player.team} against ${d.opponent}.`;
+      return `${what}\n\n${tags.join(" ")}`;
+    }
+    if (PERF.has(kind) || kind === "allround") {
+      const opp = d.opponent ? ` against ${d.opponent}` : "";
+      tags.splice(1, 0, tag(`${d.player.teamShort}v${d.opponentShort}`));
+      const what = kind === "batperf" ? `${d.player.name} made ${d.milestone.runs}${d.milestone.notOut ? "*" : ""} off ${d.milestone.balls} balls for ${d.player.team}${opp}, with ${d.milestone.fours} fours and ${d.milestone.sixes} sixes.`
+        : kind === "bowlperf" ? `${d.player.name} took ${d.milestone.wickets} for ${d.milestone.runs} in ${d.milestone.overs} overs for ${d.player.team}${opp}.`
+        : `All-round show from ${d.player.name} for ${d.player.team}${opp}: ${d.potm.figures}.`;
       return `${what}\n\n${tags.join(" ")}`;
     }
     if (kind === "result") {

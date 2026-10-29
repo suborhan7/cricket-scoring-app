@@ -100,7 +100,57 @@
     return { kind: "milestone", data: d, title: `${C.MILESTONE[ms.kind].word[0] + C.MILESTONE[ms.kind].word.slice(1).toLowerCase()}: ${name}` };
   }
 
-  function resultCard(rec) {
+  // One player's figures in a match: "bat", "bowl", or "all" for both on one card.
+  function performanceOf(rec, team, p) {
+    const match = rec.match, ru = E.settings(match), s = E.replay(match, rec.events);
+    const bi = s.innings.find((i) => i.batting === team), wi = s.innings.find((i) => i.bowling === team);
+    const b = bi && bi.batters.find((x) => x.player === p && (x.balls || x.out));
+    const w = wi && wi.bowlers.find((x) => x.player === p && x.balls);
+    return {
+      bat: b && { kind: "batting", batting: true, runs: b.runs, balls: b.balls, fours: b.fours, sixes: b.sixes, notOut: !b.out || b.out.kind === "retired", sr: b.balls ? ((b.runs * 100) / b.balls).toFixed(1) : "0" },
+      bowl: w && { kind: "bowling", batting: false, wickets: w.wickets, runs: w.runs, overs: E.oversText(w.balls, ru.ballsPerOver), maidens: w.maidens, econ: ((w.runs * ru.ballsPerOver) / w.balls).toFixed(2) },
+    };
+  }
+
+  // A performance card for any player in the match, milestone or not.
+  async function performanceCard(rec, team, p, mode) {
+    const ctx = matchContext(rec), match = rec.match, f = performanceOf(rec, team, p), other = 1 - team;
+    const name = match.teams[team].players[p];
+    const d = base(ctx, {
+      opponent: match.teams[other].name, opponentShort: match.teams[other].short,
+      matchLabel: [matchLabel(ctx.m), `${match.teams[team].short} v ${match.teams[other].short}`].filter(Boolean).join(" · "),
+    });
+    let kind, title;
+    if (mode === "all") {
+      const tiles = [{ v: `${f.bat.runs}${f.bat.notOut ? "*" : ""}`, s: `(${f.bat.balls})`, k: "Runs" }, { v: `${f.bat.sr}`, k: "Strike rate" },
+        { v: `${f.bowl.wickets}/${f.bowl.runs}`, k: f.bowl.wickets === 1 ? "Wicket" : "Wickets" }, { v: f.bowl.econ, k: "Economy" }];
+      d.potm = { result: `${match.teams[team].name} v ${match.teams[other].name}`, tiles, figures: `${tiles[0].v} ${tiles[0].s} & ${tiles[2].v}` };
+      d.heading = { text: "ALL-ROUND SHOW", lines: ["ALL", "ROUND", "SHOW"], ghost: "ALL" };
+      kind = "allround"; title = `All-round: ${name}`;
+    } else {
+      d.milestone = mode === "bat" ? f.bat : f.bowl;
+      kind = mode === "bat" ? "batperf" : "bowlperf"; title = `${mode === "bat" ? "Batting" : "Bowling"}: ${name}`;
+    }
+    await heroPlayer(rec, ctx, team, p, d);
+    return { kind, data: d, title };
+  }
+
+  // Every player's batting, bowling and all-round cards for a match. The signed-in player's own come first.
+  function performanceItems(rec) {
+    const match = rec.match, ids = match.cloud && match.cloud.playerIds, me = L.me && L.me.id;
+    const items = [];
+    match.teams.forEach((tm, team) => tm.players.forEach((name, p) => {
+      const f = performanceOf(rec, team, p), mine = !!me && ids && ids[team] && ids[team][p] === me;
+      const who = mine ? `You (${name})` : name, sort = (mine ? 1e6 : 0);
+      if (f.bat) items.push({ icon: "BAT", label: `${who}: batting`, sub: `${f.bat.runs}${f.bat.notOut ? "*" : ""} (${f.bat.balls}) · ${tm.short}`, w: sort + f.bat.runs, make: () => performanceCard(rec, team, p, "bat") });
+      if (f.bowl) items.push({ icon: "BWL", label: `${who}: bowling`, sub: `${f.bowl.wickets}/${f.bowl.runs} (${f.bowl.overs}) · ${tm.short}`, w: sort + f.bowl.wickets * 20 - f.bowl.runs / 10, make: () => performanceCard(rec, team, p, "bowl") });
+      if (f.bat && f.bowl) items.push({ icon: "AR", label: `${who}: all-round`, sub: `${f.bat.runs} & ${f.bowl.wickets}/${f.bowl.runs} · ${tm.short}`, w: sort + f.bat.runs + f.bowl.wickets * 20, make: () => performanceCard(rec, team, p, "all") });
+    }));
+    return items.sort((a, b) => b.w - a.w);
+  }
+
+  // The result, with the winning captain's photo for the Hero look.
+  async function resultCard(rec) {
     const ctx = matchContext(rec), match = rec.match, ru = E.settings(match), s = E.replay(match, rec.events);
     if (!s.result) return null;
     const winner = s.result.winner;
@@ -121,6 +171,22 @@
         topBowl: topBowl && { name: topBowl.name, figures: `${topBowl.w}/${topBowl.r}` },
       },
     });
+    const top = St.mvp(match, s)[0];
+    if (top) d.result.potm = { name: top.name, figures: [top.balls ? `${top.runs} (${top.balls})` : "", top.bowled ? `${top.wickets}/${top.conceded}` : ""].filter(Boolean).join(" & ") || top.line };
+    const wt = winner != null ? ctx.teams[winner] : null;
+    if (wt) {
+      d.player = { name: "", team: wt.name, teamShort: wt.short, c1: wt.c1, c2: wt.c2 };
+      const tid = match.cloud && match.cloud.teamIds && match.cloud.teamIds[winner];
+      if (tid && sb) {
+        const { data } = await sb.from("teams").select("captain_player_id").eq("id", tid).maybeSingle();
+        const cap = data && data.captain_player_id;
+        if (cap) {
+          const [x, pl] = await Promise.all([playerExtras(cap), sb.from("players").select("full_name").eq("id", cap).maybeSingle()]);
+          d.urls.player = x.photo; d.player.no = x.no;
+          d.result.captain = pl.data ? pl.data.full_name : "";
+        }
+      }
+    }
     d.urls.teams = teams.map((t) => t.logo);
     return { kind: "result", data: d, title: "Result card" };
   }
@@ -393,9 +459,9 @@
     if (s.result) {
       const top = St.mvp(rec.match, s)[0];
       if (top) items.push({ icon: "MVP", label: "Player of the match", sub: `${top.name} · ${top.pts} pts`, make: () => potmCard(rec) });
-      items.push({ label: "Result", sub: s.result.text, make: async () => resultCard(rec) });
+      items.push({ label: "Result", sub: s.result.text, make: () => resultCard(rec) });
     }
-    return items;
+    return items.concat(performanceItems(rec));
   }
 
   ui.screens.cards = () => {
@@ -403,7 +469,7 @@
     return `<header class="bar"><button class="icon-btn" data-act="cards-back" aria-label="Back">←</button><h1>${esc(list.title)}</h1></header>
       <section class="wrap stack">${list.items.length ? `<ul class="t-list">${list.items.map((it, i) => `<li><button class="t-row" data-act="card-make" data-i="${i}">
         <span class="card-kind">${esc(it.icon || "★")}</span><span class="t-text"><b>${esc(it.label)}</b><small>${esc(it.sub || "")}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`
-        : `<p class="muted">No cards yet. Fifties, hundreds, three-fors and five-fors show up here as they happen, and the result card when the match ends.</p>`}</section>`;
+        : `<p class="muted">No cards yet. Every player gets batting and bowling cards once they bat or bowl, milestones show up as they happen, and the result card when the match ends.</p>`}</section>`;
   };
 
   function openList(title, items, back) {
@@ -472,7 +538,7 @@
       if (!ms) return ui.toast("That milestone was changed after a score correction.");
       return show(await milestoneCard(rec, ms), "tour");
     }
-    const card = resultCard(rec);
+    const card = await resultCard(rec);
     if (card) show(card, "tour"); else openList("Cards", matchCards(rec), "tour");
   }
 
