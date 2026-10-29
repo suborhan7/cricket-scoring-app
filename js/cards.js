@@ -1007,15 +1007,20 @@
     ctx.fillStyle = "#FFFFFF"; fit(ctx, t.big, 560, 330, 700); text(ctx, t.big, 50, 880 + y);
     if (t.star) { const bw = ctx.measureText(t.big).width, size = parseInt(ctx.font.match(/(\d+)px/)[1], 10); ctx.fillStyle = acc; font(ctx, size * 0.55, 700); text(ctx, "*", 54 + bw, 880 + y - size * 0.27); }
     ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 30, 600, BODY); spaced(ctx, t.sub, 66, 935 + y, 5);
-    if (t.first) { ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, t.first.toUpperCase(), 600, 46, 500); text(ctx, t.first.toUpperCase(), 62, 1090 + y); }
-    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.last.toUpperCase(), 620, 120, 700); text(ctx, t.last.toUpperCase(), 58, 1200 + y);
+    if (t.first) { ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, t.first.toUpperCase(), 600, 46, 500); text(ctx, t.first.toUpperCase(), 62, 1066 + y); }
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.last.toUpperCase(), 620, 120, 700); text(ctx, t.last.toUpperCase(), 58, 1176 + y);
+    // The other figures on a glass strip along the foot, big enough to read on a phone.
+    const sy = 1222 + y;
+    ctx.fillStyle = rgba(mix(BG, "#FFFFFF", 0.08), 0.85); roundRect(ctx, 44, sy, W - 88, 104, 18); ctx.fill();
+    ctx.fillStyle = acc; roundRect(ctx, 44, sy, 8, 104, 4); ctx.fill();
     t.stats.forEach(([v, l], i) => {
-      const X = 64 + i * 200;
-      ctx.fillStyle = acc; font(ctx, 44, 700); text(ctx, String(v), X, 1262 + y);
-      ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 15, 700, BODY); spaced(ctx, l.toUpperCase(), X, 1286 + y, 2);
+      const X = 80 + i * 210;
+      if (i) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(X - 26, sy + 22, 2, 60); }
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, String(v), 180, 54, 700); text(ctx, String(v), X, sy + 62);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 17, 700, BODY); spaced(ctx, l.toUpperCase(), X, sy + 88, 2);
     });
-    ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, 20, 600, BODY); spaced(ctx, `${d.player.teamShort || ""} V ${d.opponentShort || ""}`, W - 60, 1262 + y, 4, "right");
-    ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 16, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 60, 1290 + y, 4, "right");
+    ctx.fillStyle = "#FFFFFF"; font(ctx, 24, 700, BODY); spaced(ctx, `${d.player.teamShort || ""} V ${d.opponentShort || ""}`, W - 76, sy + 52, 4, "right");
+    ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 15, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 76, sy + 82, 4, "right");
     grain(ctx, W, H, 0.06);
   }
 
