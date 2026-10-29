@@ -20,10 +20,11 @@
   const POTM_STYLES = [["H", "Halo"], ["S", "Spotlight"], ["P", "Split"]];
   // Result: Face-off first, then Scoreline and Hero (the player of the match on the winners' stage).
   const RESULT_STYLES = [["F", "Face-off"], ["L", "Scoreline"], ["R", "Hero"]];
+  const SCHEDULE_STYLES = [["T", "Timeline"], ["W", "Showdown"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1371,6 +1372,128 @@
     squad: drawSquad, leaders: drawLeaders, target: drawTarget, champions: drawChampions,
   };
 
+  // ---------- Match day: Timeline and Showdown ----------
+
+  // Where the person is in a cut-out: its opaque bounds, measured once per image.
+  function cutBox(img) {
+    if (img.__box) return img.__box;
+    const k = Math.min(1, 200 / Math.max(img.width, img.height)), w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
+    const c = canvas(w, h), x = c.getContext("2d"); x.drawImage(img, 0, 0, w, h);
+    const a = x.getImageData(0, 0, w, h).data; let x0 = w, y0 = h, x1 = 0, y1 = 0;
+    for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) if (a[(y * w + i) * 4 + 3] > 128) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 <= x0) { x0 = 0; y0 = 0; x1 = w; y1 = h; }
+    return (img.__box = { x: x0 / k, y: y0 / k, w: (x1 - x0) / k, h: (y1 - y0) / k });
+  }
+  // A captain from the chest up, standing on `bottom`. A photo with a background is faded in instead.
+  function bust(ctx, img, cx, bottom, h) {
+    if (!img) return;
+    if (!cutout(img)) { player(ctx, img, { cx, bottom, h, w: h * 0.95 }); return; }
+    const b = cutBox(img), ch = Math.min(b.h, b.w * 0.9), w = b.w * (h / ch);
+    ctx.drawImage(img, b.x, b.y, b.w, ch, cx - w / 2, bottom - h, w, h);
+  }
+  const slant = (ctx, x, y, w, h, k) => { ctx.beginPath(); ctx.moveTo(x + k, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w - k, y + h); ctx.lineTo(x, y + h); ctx.closePath(); };
+  function dayRows(n, y0, y1, max, gap) {
+    const h = Math.min(max, (y1 - y0 - gap * (n - 1)) / n), start = y0 + Math.max(0, (y1 - y0 - (h * n + gap * (n - 1))) / 2) * 0.5;
+    return Array.from({ length: n }, (_, i) => [start + i * (h + gap), h]);
+  }
+  // Background from the tournament colours, the header, and the room left for the rows.
+  function dayFrame(ctx, W, H, d, italic) {
+    const sc = d.schedule, P = paletteOf(d.tournament.c1 || "#0F4C81", d.tournament.c2 || "#F5C542"), acc = P.mvp || P.accent, hy = (H - 1350) * 0.25;
+    const BG = mix(P.deep, "#000000", 0.4); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W * 0.7, 200, 40, W * 0.7, 200, 1100); g.addColorStop(0, rgba(P.base, 0.75)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 26, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, 74 + hy, 12, "center");
+    const title = sc.title === "Results" ? "RESULTS" : "MATCH SCHEDULE";
+    ctx.save(); ctx.translate(W / 2, 200 + hy); if (italic) ctx.transform(1, 0, -0.18, 1, 0, 0);
+    fit(ctx, title, W - 100, 136, 700); ctx.textAlign = "center";
+    if (italic) { ctx.fillStyle = mix(P.deep, "#000000", 0.3); ctx.fillText(title, 6, 8); const gt = ctx.createLinearGradient(0, -110, 0, 0); gt.addColorStop(0, "#FFFFFF"); gt.addColorStop(1, mix("#FFFFFF", acc, 0.35)); ctx.fillStyle = gt; }
+    else ctx.fillStyle = "#FFFFFF";
+    ctx.fillText(title, 0, 0); ctx.restore();
+    const line = [sc.sub, sc.kicker].filter(Boolean).join(" · ").toUpperCase();
+    const spons = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false);
+    if (spons) sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)");
+    return { P, acc, BG, hy, line, bottom: H - (spons ? 100 : 50) };
+  }
+  // What the time slot says: the time before the match, LIVE during it, the score after.
+  const slotText = (r) => r.live ? "LIVE" : r.result ? r.score || "FT" : r.time || "TBA";
+
+  function drawTimeline(ctx, W, H, th, d) {
+    const rows = d.schedule.rows, F = dayFrame(ctx, W, H, d, false), { P, acc, BG, hy } = F;
+    const gl = ctx.createRadialGradient(0, 250, 20, 0, 250, 700); gl.addColorStop(0, rgba(acc, 0.22)); gl.addColorStop(1, rgba(acc, 0)); ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+    const gr = ctx.createLinearGradient(W / 2 - 190, 0, W / 2 + 190, 0); gr.addColorStop(0, acc); gr.addColorStop(1, P.base); ctx.fillStyle = gr; roundRect(ctx, W / 2 - 190, 228 + hy, 380, 6, 3); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, F.line, W - 140, 26, 600); spaced(ctx, F.line, W / 2 + 4, 284 + hy, 8, "center");
+    const n = Math.max(1, rows.length), L = dayRows(n, 340 + hy * 2, F.bottom, n <= 2 ? 260 : 230 + hy * 0.3, n > 5 ? 10 : 26);
+    const lx = 222, x0 = 254, x1 = W - 20, mid = (x0 + x1) / 2;
+    const gL = ctx.createLinearGradient(0, L[0][0], 0, L[n - 1][0] + L[n - 1][1]); gL.addColorStop(0, acc); gL.addColorStop(1, P.base); ctx.fillStyle = gL; ctx.fillRect(lx - 2, L[0][0], 4, L[n - 1][0] + L[n - 1][1] - L[0][0]);
+    rows.forEach((r, i) => {
+      const [y, h] = L[i], top = y + h * 0.2, bh = h - h * 0.2, sk = bh * 0.22, cy = top + bh / 2, slot = slotText(r), sub = r.result || r.tag || "";
+      const ts = Math.min(56, h * 0.3); ctx.fillStyle = r.live ? "#FF4D5E" : "#FFFFFF"; fit(ctx, slot, lx - 50, ts, 700); text(ctx, slot, lx - 26, cy + ts * 0.2, "right");
+      const ss = Math.max(11, Math.min(18, h * 0.085)); ctx.fillStyle = acc; fit(ctx, sub.toUpperCase(), lx - 40, ss, 700, BODY, 9); spaced(ctx, sub.toUpperCase(), lx - 26, cy + ts * 0.2 + ss * 1.6, 1, "right");
+      if (h > 140 && !r.result) { ctx.fillStyle = "rgba(255,255,255,0.55)"; font(ctx, ss, 700, BODY); spaced(ctx, `MATCH ${i + 1}`, lx - 26, cy + ts * 0.2 + ss * 3.2, 3, "right"); }
+      ctx.beginPath(); ctx.arc(lx, cy, Math.min(15, h * 0.08), 0, 7); ctx.fillStyle = BG; ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 5; ctx.stroke();
+      r.teams.forEach((t, k) => {
+        const tp = paletteOf(t.c1 || "#0F7A45", t.c2 || "#111111"), a = k ? mid + 34 : x0, b = k ? x1 : mid - 34, dir = k ? "right" : "left";
+        const lost = r.winner != null && r.winner !== k;
+        slant(ctx, a, top, b - a, bh, sk); const g = ctx.createLinearGradient(a, top, b, top + bh); g.addColorStop(k ? 1 : 0, tp.base); g.addColorStop(k ? 0 : 1, mix(tp.deep, "#000000", 0.15)); ctx.fillStyle = g; ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(a + sk, top, b - a - sk, 3);
+        const cap = d.images.caps && d.images.caps[i * 2 + k], lg = d.images.teams[i * 2 + k];
+        const bH = Math.min(h * 1.02, 200), bw = bH * 1.05, bx = k ? b - sk / 2 - bw / 2 - 4 : a + sk / 2 + bw / 2 + 4;
+        if (cap) { ctx.save(); ctx.beginPath(); ctx.rect(a - 10, y - 30, b - a + 20, top + bh - y + 30); ctx.clip(); bust(ctx, cap, bx, top + bh, bH); ctx.restore(); }
+        else logo(ctx, lg, t, bx, cy, Math.min(bh * 0.8, 160));
+        const tx0 = k ? bx - bw / 2 - 10 : bx + bw / 2 + 10, room = k ? tx0 - a - 40 : b - tx0 - 40;
+        const ls = Math.min(bh * 0.36, 72); if (cap && h > 120) logo(ctx, lg, t, k ? tx0 - ls / 2 : tx0 + ls / 2, top + ls / 2 + 8, ls);
+        const ns = Math.min(58, bh * (h > 120 ? 0.3 : 0.42)), nm = room > 300 || (t.name || "").length < 9 ? (t.name || t.short || "").toUpperCase() : (t.short || t.name || "").toUpperCase();
+        ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 8; fit(ctx, nm, room, ns, 700); text(ctx, nm, tx0, cap && h > 120 ? top + bh * 0.78 : top + bh * 0.62, dir); ctx.shadowBlur = 0;
+        if (lost) { ctx.fillStyle = "rgba(0,0,0,0.4)"; slant(ctx, a, top, b - a, bh, sk); ctx.fill(); }
+      });
+      const vr = Math.min(48, bh * 0.3); ctx.beginPath(); ctx.arc(mid, cy, vr, 0, 7); ctx.fillStyle = "#0B0D12"; ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 4; ctx.stroke();
+      ctx.fillStyle = acc; font(ctx, vr * 0.8, 700); text(ctx, "VS", mid, cy + vr * 0.28, "center");
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  function drawShowdown(ctx, W, H, th, d) {
+    const rows = d.schedule.rows, F = dayFrame(ctx, W, H, d, true), { P, acc, BG, hy } = F;
+    font(ctx, 24, 700); let lw = 0; if ("letterSpacing" in ctx) { ctx.letterSpacing = "8px"; lw = ctx.measureText(F.line).width; ctx.letterSpacing = "0px"; } else lw = ctx.measureText(F.line).width * 1.4;
+    lw = Math.min(W - 80, lw + 70);
+    const g0 = ctx.createLinearGradient(W / 2 - lw / 2, 0, W / 2 + lw / 2, 0); g0.addColorStop(0, acc); g0.addColorStop(1, rgba(acc, 0.35)); ctx.fillStyle = g0; slant(ctx, W / 2 - lw / 2, 238 + hy, lw, 50, 14); ctx.fill();
+    ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; fit(ctx, F.line, lw - 60, 24, 700); spaced(ctx, F.line, W / 2 + 4, 272 + hy, 8, "center");
+    const n = Math.max(1, rows.length), L = dayRows(n, 320 + hy * 2, F.bottom, n <= 2 ? 330 : 245 + hy * 0.3, n > 5 ? 8 : 20);
+    rows.forEach((r, i) => {
+      const [y, h] = L[i], fw = Math.min(h * 0.92, 200), sk = fw * 0.14, ph = Math.min(84, Math.max(36, h * 0.36)), cw = Math.min(220, Math.max(150, h * 0.95));
+      r.teams.forEach((t, k) => {
+        const tp = paletteOf(t.c1 || "#0F7A45", t.c2 || "#111111"), lost = r.winner != null && r.winner !== k;
+        const fx = k ? W - 24 - fw : 24, fy = y + (h - fw) / 2 + (h > 150 ? h * 0.06 : 0);
+        ctx.save(); slant(ctx, fx, fy, fw, fw, sk); const gf = ctx.createLinearGradient(fx, fy, fx, fy + fw); gf.addColorStop(0, tp.base); gf.addColorStop(1, tp.deep); ctx.fillStyle = gf; ctx.shadowColor = rgba(tp.base, 0.6); ctx.shadowBlur = 24; ctx.fill(); ctx.restore();
+        slant(ctx, fx, fy, fw, fw, sk); ctx.strokeStyle = tp.accent || "#FFFFFF"; ctx.lineWidth = 3; ctx.stroke();
+        logo(ctx, d.images.teams[i * 2 + k], t, fx + fw / 2, fy + fw / 2, fw * 0.66);
+        const px0 = k ? W / 2 + cw / 2 : fx + fw + 6, px1 = k ? fx - 6 : W / 2 - cw / 2, py = y + h - ph, pk = ph * 0.18;
+        const cap = d.images.caps && d.images.caps[i * 2 + k], bx = k ? px0 + (px1 - px0) * 0.3 : px0 + (px1 - px0) * 0.7;
+        if (cap) {
+          const bH = Math.min(h * 0.7, py - y + 14), pw = Math.min(px1 - px0 - 10, bH * 1.25), pt = py - bH * 0.8;
+          ctx.save(); slant(ctx, bx - pw / 2, pt, pw, py - pt, (py - pt) * 0.2); const gb = ctx.createLinearGradient(0, pt, 0, py); gb.addColorStop(0, tp.base); gb.addColorStop(1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = gb; ctx.shadowColor = rgba(tp.base, 0.5); ctx.shadowBlur = 20; ctx.fill(); ctx.restore();
+          ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.fillRect(bx - pw / 2 + (py - pt) * 0.2, pt, pw - (py - pt) * 0.2, 3);
+          ctx.save(); ctx.beginPath(); ctx.rect(px0 - 20, y - 20, px1 - px0 + 40, py - y + 20); ctx.clip(); bust(ctx, cap, bx, py, bH); ctx.restore();
+        }
+        slant(ctx, px0, py, px1 - px0, ph, pk); const gp = ctx.createLinearGradient(px0, 0, px1, 0); gp.addColorStop(k ? 1 : 0, "#FFFFFF"); gp.addColorStop(k ? 0 : 1, "#E4E1F0"); ctx.fillStyle = gp; ctx.fill();
+        ctx.fillStyle = tp.base; ctx.beginPath();
+        if (k) { ctx.moveTo(px1 - 2, py); ctx.lineTo(px1 + 8, py); ctx.lineTo(px1 + 8 - pk, py + ph); ctx.lineTo(px1 - 2 - pk, py + ph); }
+        else { ctx.moveTo(px0 + pk - 8, py); ctx.lineTo(px0 + pk + 2, py); ctx.lineTo(px0 + 2, py + ph); ctx.lineTo(px0 - 8, py + ph); }
+        ctx.fill();
+        const nm = (t.name || t.short || "").toUpperCase(), fs = Math.min(46, ph * 0.62);
+        ctx.fillStyle = mix(tp.deep, "#000000", 0.3); fit(ctx, nm, px1 - px0 - 60, fs, 700); text(ctx, nm, k ? px1 - 30 : px0 + 30, py + ph / 2 + fs * 0.36, k ? "right" : "left");
+        if (lost) { ctx.fillStyle = "rgba(0,0,0,0.35)"; slant(ctx, px0, py, px1 - px0, ph, pk); ctx.fill(); }
+      });
+      const vs = Math.min(110, h * 0.5), ms = Math.max(12, Math.min(20, h * 0.1));
+      ctx.fillStyle = "#7FD8FF"; font(ctx, ms, 600); spaced(ctx, r.result ? "RESULT" : `MATCH ${i + 1}`, W / 2 + 4, y + h * 0.2, 5, "center");
+      ctx.save(); ctx.translate(W / 2, y + h * 0.2 + vs * 0.95); ctx.transform(1, 0, -0.18, 1, 0, 0); font(ctx, vs, 700); ctx.textAlign = "center";
+      ctx.fillStyle = mix(P.deep, "#000000", 0.3); ctx.fillText("VS", 5, 6); const gv = ctx.createLinearGradient(-vs, -vs, vs, 0); gv.addColorStop(0, "#9EE7FF"); gv.addColorStop(0.5, "#FFFFFF"); gv.addColorStop(1, acc); ctx.fillStyle = gv; ctx.fillText("VS", 0, 0); ctx.restore();
+      const slot = slotText(r), chs = Math.max(13, Math.min(24, h * 0.11)); font(ctx, chs, 700); const tw = Math.min(cw + 30, ctx.measureText(slot).width + 40), chh = chs * 1.8, chy = y + h - chh;
+      ctx.fillStyle = mix(BG, "#000000", 0.4); slant(ctx, W / 2 - tw / 2, chy, tw, chh, 8); ctx.fill(); ctx.strokeStyle = r.live ? "#FF4D5E" : acc; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = r.live ? "#FF4D5E" : acc; fit(ctx, slot, tw - 24, chs, 700); text(ctx, slot, W / 2, chy + chh / 2 + chs * 0.36, "center");
+    });
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -1381,12 +1504,13 @@
     const u = d.urls || {};
     // Sponsors: d.sponsors [{name, url}], or the older single d.sponsor with urls.sponsor.
     if (!d.sponsors) d.sponsors = d.sponsor && (u.sponsor || d.sponsor.name) ? [{ name: d.sponsor.name || "", url: u.sponsor || "" }] : [];
-    const [tournament, playerImg, sponsors, teams] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg))]);
-    d.images = { tournament, player: playerImg, sponsors, teams };
+    const [tournament, playerImg, sponsors, teams, caps] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg)), Promise.all((u.caps || []).map(loadImg))]);
+    d.images = { tournament, player: playerImg, sponsors, teams, caps };
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "schedule") { (style === "W" ? drawShowdown : drawTimeline)(ctx, W, H, th, d); return cv; }
     if (kind === "potm" || kind === "allround") { ({ H: drawHalo, S: drawPotmSpotlight, P: drawPotmSplit })[style](ctx, W, H, th, d); return cv; }
     const K = KITS[style](th, W, H, d).use(ctx);
     if (HERO.has(kind)) (style === "B" ? drawHeroB : drawHeroA)(ctx, W, H, th, Object.assign(d, { kind }), K);

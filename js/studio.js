@@ -263,13 +263,29 @@
     return out;
   }
 
-  function scheduleCard(T, p) {
+  // Each team's captain photo, by team id.
+  async function captainPhotos(ids) {
+    const out = new Map();
+    if (!sb || !ids.length) return out;
+    const { data: tm } = await sb.from("teams").select("id, captain_player_id").in("id", ids);
+    const caps = (tm || []).filter((t) => t.captain_player_id);
+    if (!caps.length) return out;
+    const { data: pl } = await sb.from("players").select("id, photo_path").in("id", caps.map((t) => t.captain_player_id));
+    const photo = new Map((pl || []).filter((x) => x.photo_path).map((x) => [x.id, url("photos", x.photo_path)]));
+    for (const t of caps) if (photo.has(t.captain_player_id)) out.set(t.id, photo.get(t.captain_player_id));
+    return out;
+  }
+
+  async function scheduleCard(T, p) {
     const ti = tournamentInfo(T.t), rows = p.page.map((m) => scheduleRow(T, m));
     const stages = [...new Set(p.page.map((m) => STAGE[m.stage] || ""))].filter(Boolean);
     const sub = [stages.length === 1 ? stages[0] : "", p.of > 1 ? `Part ${p.n + 1} of ${p.of}` : ""].filter(Boolean).join(" · ");
     const kicker = dayText(p.when).replace(",", " ·").toUpperCase();
     const d = base({ ti }, { schedule: { title: p.done ? "Results" : "Match day", kicker, sub, rows } });
     d.urls.teams = [].concat(...rows.map((r) => r.logos));
+    const ids = [].concat(...p.page.map((m) => [m.team1_id, m.team2_id]));
+    const caps = await captainPhotos([...new Set(ids)]).catch(() => new Map());
+    d.urls.caps = ids.map((id) => caps.get(id) || "");
     return { kind: "schedule", data: d, title: `${p.done ? "Results" : "Match day"}, ${dayText(p.when)}${p.of > 1 ? ` (${p.n + 1}/${p.of})` : ""}` };
   }
 
@@ -640,7 +656,7 @@
     },
     "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) show(versusCard(L.tour, m), "tour"); },
     "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
-    "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) show(scheduleCard(L.tour, p), "tour"); },
+    "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) scheduleCard(L.tour, p).then((c) => show(c, "tour")); },
     "card-groups"() { show(groupsCard(L.tour), "tour"); },
     async "card-award"(d) { ui.toast("Making the card…"); const card = await awardCard(L.tour, d.k); if (card) show(card, "tour"); },
     async "card-lineup"(d) { const rec = await loadMatch(L.tour.matches.find((x) => x.id === d.id)); if (rec) show(await lineupCard(rec), "tour"); },
