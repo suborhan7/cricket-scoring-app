@@ -14,7 +14,7 @@
 | --- | --- |
 | `profiles` | One row per signed-up user (made automatically) |
 | `tournaments` | Name, logo, colours, overs, dates. A tournament or a two-team series |
-| `tournament_members` | Who runs a tournament: organiser, scorer or media |
+| `tournament_members` | Who runs a tournament: organiser, scorer or media manager |
 | `teams`, `players`, `team_players` | Teams and squads. A team is made once and can join many tournaments |
 | `tournament_teams` | Which teams are in a tournament, and their group |
 | `matches` | Fixtures, the line-ups that played, toss and result |
@@ -29,6 +29,7 @@ Storage buckets `logos` and `photos` are public to view. Each user uploads into 
 - **Any logged-in user:** creates a tournament (and becomes its organiser), a team or a player.
 - **Organiser:** edits the tournament, adds teams, groups, fixtures and scorers.
 - **Scorer:** adds, fixes and undoes balls in that tournament's matches.
+- **Media manager:** makes and shares the tournament's cards and gets card-ready alerts, but can't score or change the tournament.
 - **Team creator:** edits the team and its squad. **Player creator or the player themself:** edits the profile.
 
 ## Test the rules locally

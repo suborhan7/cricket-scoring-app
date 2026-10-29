@@ -64,7 +64,7 @@
   }
 
   const tourRow = (t) => `<li><button class="t-row" data-act="t-open" data-id="${t.id}">${badge(t)}
-    <span class="t-text"><b>${esc(t.name)}</b><small>${t.handle ? `@${esc(t.handle)} · ` : ""}${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} overs${t.roles ? ` · ${t.roles.includes("organiser") ? "Organiser" : t.roles.includes("scorer") ? "Scorer" : "Media"}` : ""}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
+    <span class="t-text"><b>${esc(t.name)}</b><small>${t.handle ? `@${esc(t.handle)} · ` : ""}${t.kind === "series" ? "Series" : "Tournament"} · ${t.overs_per_side} overs${t.roles ? ` · ${t.roles.includes("organiser") ? "Organiser" : t.roles.includes("scorer") ? "Scorer" : "Media manager"}` : ""}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
   const teamRole = (t) => (t.captain ? "Captain" : t.created_by === (L.user && L.user.id) ? "Your team" : "Player");
   const teamRow = (t) => `<li><button class="t-row" data-act="my-team" data-id="${t.id}">${badge(t)}
     <span class="t-text"><b>${esc(t.name)}</b><small>${t.count} player${t.count === 1 ? "" : "s"} · ${teamRole(t)}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
