@@ -563,15 +563,23 @@
     const groups = {};
     for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm.id);
     const ms = tableMatches(T);
+    // A team's last five results, oldest first.
+    const formOf = (id) => ms.filter((m) => (m.team1_id === id || m.team2_id === id) && (m.status === "done" || m.status === "abandoned"))
+      .sort((x, y) => String(x.starts_at || "").localeCompare(String(y.starts_at || ""))).slice(-5)
+      .map((m) => m.status === "abandoned" ? "N" : !m.winner_team_id ? "T" : m.winner_team_id === id ? "W" : "L");
     const tables = Object.keys(groups).sort().map((g) => {
-      const rows = CSA.stats.pointsTable(groups[g], ms);
-      const showT = rows.some((r) => r.t), showNr = rows.some((r) => r.nr);
-      const head = `<tr><th>${g ? `Group ${esc(g)}` : "Team"}</th><th>P</th><th>W</th><th>L</th>${showT ? "<th>T</th>" : ""}${showNr ? "<th>NR</th>" : ""}<th>Pts</th><th>NRR</th></tr>`;
+      const rows = CSA.stats.pointsTable(groups[g], ms), q = rows.length > 2 ? 2 : 0;
+      const showT = rows.some((r) => r.t), showNr = rows.some((r) => r.nr), n = 3 + (showT ? 1 : 0) + (showNr ? 1 : 0);
+      const cols = `--n:${n}`;
+      const head = `<div class="pt-cols" style="${cols}"><span>Team</span><span>P</span><span>W</span><span>L</span>${showT ? "<span>T</span>" : ""}${showNr ? "<span>NR</span>" : ""}<span>NRR</span><span>Pts</span></div>`;
       const body = rows.map((r, i) => {
-        const tm = teamById(r.id);
-        return `<tr><td><span class="tbl-team"><span class="pos">${i + 1}</span>${badge(tm)}<b>${esc(tm.short_name)}</b></span></td><td>${r.p}</td><td>${r.w}</td><td>${r.l}</td>${showT ? `<td>${r.t}</td>` : ""}${showNr ? `<td>${r.nr}</td>` : ""}<td class="pts">${r.pts}</td><td>${nrrText(r.nrr)}</td></tr>`;
+        const tm = teamById(r.id), f = formOf(r.id);
+        const form = f.length ? `<span class="pt-form">${f.map((c) => `<i class="f-${c}">${c}</i>`).join("")}</span>` : "";
+        return `<div class="pt-row${i < q ? " q" : ""}${i === q - 1 ? " cut" : ""}" style="${cols};--c1:${tm.primary_color || "#0F7A45"}">
+          <span class="pt-team"><span class="pos">${i + 1}</span>${badge(tm)}<span class="pt-name"><b>${esc(tm.short_name)}</b><small>${esc(tm.name)}</small>${form}</span></span>
+          <span>${r.p}</span><span>${r.w}</span><span>${r.l}</span>${showT ? `<span>${r.t}</span>` : ""}${showNr ? `<span>${r.nr}</span>` : ""}<span class="pt-nrr">${nrrText(r.nrr)}</span><span class="pt-pts">${r.pts}</span></div>`;
       }).join("");
-      return `<div class="table-wrap"><table class="tbl tbl-points"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+      return `<section class="ptable"><header class="ptable-head"><h3>${g ? `Group ${esc(g)}` : "Standings"}</h3>${q ? `<span>Top ${q} go through</span>` : ""}</header>${head}${body}</section>`;
     }).join("");
     const done = ms.filter((m) => m.status === "done" || m.status === "abandoned").length;
     return tables + `<p class="muted small">${done ? `From ${done} finished match${done === 1 ? "" : "es"}.` : "No results yet."} Win 2 points, tie or no result 1. NRR counts an all-out side as facing its full overs.</p>` + knockouts(T);
