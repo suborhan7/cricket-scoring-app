@@ -15,8 +15,9 @@
   const initialsOf = (name) => String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 
   function tournamentInfo(t) {
-    if (!t) return { info: { name: "Friendly match", short: "", initials: "CS", c1: "#0F7A45", c2: "#0E1A14" }, logo: "", sponsor: { show: true } };
+    if (!t) return { id: "", info: { name: "Friendly match", short: "", initials: "CS", c1: "#0F7A45", c2: "#0E1A14" }, logo: "", sponsor: { show: false } };
     return {
+      id: t.id,
       info: { name: t.name, short: t.short_name || "", initials: t.short_name || initialsOf(t.name), c1: t.primary_color, c2: t.secondary_color },
       logo: url("logos", t.logo_path),
       sponsor: { show: t.show_sponsor !== false, name: t.sponsor_name || "" , logo: url("logos", t.sponsor_logo_path) },
@@ -41,8 +42,19 @@
     return { T, m, teams, ti };
   }
 
+  // Sponsor logos added on the card page are kept on this device, per tournament, as small data URLs.
+  const sponsorKey = (tid) => `csa.cardSponsors.${tid || "friendly"}`;
+  function savedSponsors(tid) { try { return JSON.parse(localStorage.getItem(sponsorKey(tid)) || "[]"); } catch (e) { return []; } }
+  function saveSponsors(tid, list) { try { localStorage.setItem(sponsorKey(tid), JSON.stringify(list)); return true; } catch (e) { return false; } }
+
+  // The tournament's own sponsor (from its settings, when shown and set) and then this device's.
+  function sponsorsFor(ti) {
+    const sp = ti.sponsor, own = sp.show && (sp.logo || sp.name) ? [{ name: sp.name || "", url: sp.logo || "", from: "tour" }] : [];
+    return own.concat(savedSponsors(ti.id).map((x) => ({ name: "", url: x.url, from: "device", id: x.id })));
+  }
+
   function base(ctx, extra) {
-    return Object.assign({ tournament: ctx.ti.info, sponsor: ctx.ti.sponsor, urls: { tournament: ctx.ti.logo, sponsor: ctx.ti.sponsor.logo } }, extra);
+    return Object.assign({ tournament: ctx.ti.info, tournamentId: ctx.ti.id, sponsors: sponsorsFor(ctx.ti), urls: { tournament: ctx.ti.logo } }, extra);
   }
 
   // A player's photo and shirt number, by database id.
@@ -487,6 +499,27 @@
     if (ui.view().screen === "cardview") ui.render();
   }
 
+  // Cards with a player photo: upload another one for this card, or go back to the profile photo.
+  const HAS_PHOTO = new Set(["milestone", "potm", "award", "leaders"]);
+  function photoBox(c) {
+    if (!HAS_PHOTO.has(c.kind)) return "";
+    const custom = c.profilePhoto !== undefined;
+    return `<div class="card stack-s"><span class="eyebrow">Player photo</span>
+      <p class="muted small">${custom ? "Using the photo you uploaded, for this card only." : c.data.urls.player ? "From the player's profile." : "No profile photo yet, so the card shows a silhouette."} A PNG with no background looks best.</p>
+      <div class="chips"><label class="chip file-btn">${custom ? "Upload another" : "Upload photo"}<input type="file" accept="image/*" data-card-photo="1" hidden></label>
+      ${custom ? `<button class="chip" data-act="card-photo-reset">Use profile photo</button>` : ""}</div></div>`;
+  }
+
+  // Sponsors on the card: the tournament's own, plus logos added here (kept on this phone). None means no sponsor section.
+  function sponsorBox(c) {
+    const list = c.data.sponsors || [];
+    const item = (sp, i) => `<span class="chip sponsor-chip">${sp.url ? `<img src="${esc(sp.url)}" alt="">` : ""}${esc(sp.name || (sp.from === "tour" ? "Tournament sponsor" : `Sponsor ${i + 1}`))}
+      <button class="chip-x" data-act="card-sponsor-remove" data-i="${i}" aria-label="Remove sponsor">✕</button></span>`;
+    return `<div class="card stack-s"><span class="eyebrow">Sponsors</span>
+      <p class="muted small">${list.length ? "Shown along the bottom of the card." : "No sponsors, so the card has no sponsor section."} Logos added here stay on this phone for this tournament's cards.</p>
+      <div class="chips">${list.map(item).join("")}${list.length < 4 ? `<label class="chip file-btn">+ Add sponsor logo<input type="file" accept="image/*" data-card-sponsor="1" hidden></label>` : ""}</div></div>`;
+  }
+
   ui.screens.cardview = () => {
     const c = V.card;
     const chip = (v, label) => `<button class="chip ${c.size === v ? "on" : ""}" data-act="card-size" data-v="${v}">${label}</button>`;
@@ -496,6 +529,7 @@
         <div class="chips" role="group" aria-label="Look">${C.stylesFor(c.kind).map(look).join("")}</div>
         <div class="chips" role="group" aria-label="Size">${chip("post", "Post 4:5")}${chip("story", "Story 9:16")}</div>
         <div class="card-preview ${c.size}">${c.loading ? `<p class="muted">Drawing…</p>` : c.error ? `<p class="error">${esc(c.error)}</p>` : `<img src="${c.preview}" alt="${esc(c.title || "Card")} preview">`}</div>
+        ${photoBox(c)}${sponsorBox(c)}
         <div class="row-2"><button class="btn btn-primary btn-big" data-act="card-share" ${c.loading ? "disabled" : ""}>Share</button><button class="btn btn-big" data-act="card-save" ${c.loading ? "disabled" : ""}>Save image</button></div>
         <label class="field"><span>Caption</span><textarea id="card-caption" rows="6">${esc(c.caption)}</textarea></label>
         <button class="btn" data-act="card-copy">Copy caption</button>
@@ -576,6 +610,34 @@
     },
     async "card-save"() { saveImage(await blobOf(V.card.canvas)); ui.toast("Image saved"); },
     "card-copy"() { copyCaption(false); },
+    "card-photo-reset"() { const c = V.card; c.caption = currentCaption(); c.data.urls.player = c.profilePhoto; delete c.profilePhoto; draw(); },
+    "card-sponsor-remove"(d) {
+      const c = V.card, sp = c.data.sponsors[+d.i];
+      if (!sp) return;
+      c.caption = currentCaption();
+      c.data.sponsors.splice(+d.i, 1);
+      // A logo added on this phone is forgotten; the tournament's own sponsor only leaves this card.
+      if (sp.from === "device") saveSponsors(c.data.tournamentId, savedSponsors(c.data.tournamentId).filter((x) => x.id !== sp.id));
+      draw();
+    },
+  });
+
+  document.addEventListener("change", async (ev) => {
+    const t = ev.target, c = V.card, file = t.files && t.files[0];
+    if (!c || !file || !(t.dataset.cardPhoto || t.dataset.cardSponsor)) return;
+    c.caption = currentCaption();
+    try {
+      if (t.dataset.cardPhoto) {
+        const out = await lg.shrink(file, 1400);
+        if (c.profilePhoto === undefined) c.profilePhoto = c.data.urls.player || "";
+        c.data.urls.player = out.url;
+      } else {
+        const out = await lg.shrink(file, 400), sp = { id: String(Date.now()), url: out.canvas.toDataURL("image/png") };
+        if (!saveSponsors(c.data.tournamentId, savedSponsors(c.data.tournamentId).concat(sp))) ui.toast("Added to this card only: this phone has no room to keep it.");
+        c.data.sponsors.push(Object.assign({ name: "", from: "device" }, sp));
+      }
+    } catch (e) { ui.toast("That image couldn't be opened."); return; }
+    draw();
   });
 
   // A "Cards" button under every scorecard, before the change log.
