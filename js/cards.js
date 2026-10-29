@@ -988,40 +988,47 @@
     }
     ctx.restore();
     ctx.fillStyle = rgba(P.glow, 0.1); fit(ctx, t.mark, W - 100, 1020, 700); text(ctx, t.mark, 700, 1080 + dy * 0.7, "center");
-    // A silhouette stands in smaller than a real photo, so it reads as a placeholder, not a giant.
-    const ph = d.images.player ? 1120 + dy * 0.85 : 760 + dy * 0.4;
-    player(ctx, d.images.player, { cx: 720, bottom: H, h: ph, w: d.images.player ? 760 : 520 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    // The player stands on the name block at the foot; a silhouette stands in smaller than a real photo.
+    const nameTop = H - 190, img = d.images.player;
+    player(ctx, img, { cx: 730, bottom: nameTop + 40, h: img ? 1000 + dy * 0.85 : 700 + dy * 0.4, w: img ? 700 : 500 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
     g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, rgba(BG, 0.92)); g.addColorStop(0.42, rgba(BG, 0.55)); g.addColorStop(0.62, rgba(BG, 0));
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    g = ctx.createLinearGradient(0, H - 420, 0, H); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(0.6, rgba(BG, 0.9)); g.addColorStop(1, BG);
-    ctx.fillStyle = g; ctx.fillRect(0, H - 420, W, 420);
+    g = ctx.createLinearGradient(0, nameTop - 220, 0, nameTop + 40); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG);
+    ctx.fillStyle = g; ctx.fillRect(0, nameTop - 220, W, 260); ctx.fillStyle = BG; ctx.fillRect(0, nameTop + 40, W, H);
     g = ctx.createLinearGradient(0, 0, 0, 220); g.addColorStop(0, rgba(BG, 0.7)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, 220);
     // Header: tournament, match; sponsors on the right.
     tournamentMark(ctx, d, 60, 62, 84);
     ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 440, 26, 700); text(ctx, d.tournament.name.toUpperCase(), 162, 98);
     ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.matchLabel || "").toUpperCase(), 163, 128, 2);
     sponsorRow(ctx, d, W - 60, 76, "right", "rgba(255,255,255,0.55)");
-    // The figures.
-    const y = dy;
-    ctx.fillStyle = acc; font(ctx, 30, 700, BODY); spaced(ctx, t.word, 64, 560 + y, 14); ctx.fillRect(64, 578 + y, 90, 6);
-    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.big, 560, 330, 700); text(ctx, t.big, 50, 880 + y);
-    if (t.star) { const bw = ctx.measureText(t.big).width, size = parseInt(ctx.font.match(/(\d+)px/)[1], 10); ctx.fillStyle = acc; font(ctx, size * 0.55, 700); text(ctx, "*", 54 + bw, 880 + y - size * 0.27); }
-    ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 30, 600, BODY); spaced(ctx, t.sub, 66, 935 + y, 5);
-    if (t.first) { ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, t.first.toUpperCase(), 600, 46, 500); text(ctx, t.first.toUpperCase(), 62, 1066 + y); }
-    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.last.toUpperCase(), 620, 120, 700); text(ctx, t.last.toUpperCase(), 58, 1176 + y);
-    // The other figures on a glass strip along the foot, big enough to read on a phone.
-    const sy = 1222 + y;
-    ctx.fillStyle = rgba(mix(BG, "#FFFFFF", 0.08), 0.85); roundRect(ctx, 44, sy, W - 88, 104, 18); ctx.fill();
-    ctx.fillStyle = acc; roundRect(ctx, 44, sy, 8, 104, 4); ctx.fill();
+    // The figures on the left, the other numbers on a strip under them.
+    const y = dy * 0.5;
+    ctx.fillStyle = acc; font(ctx, 30, 700, BODY); spaced(ctx, t.word, 64, 460 + y, 14); ctx.fillRect(64, 478 + y, 90, 6);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.big, 560, 330, 700); text(ctx, t.big, 50, 780 + y);
+    if (t.star) { const bw = ctx.measureText(t.big).width, size = parseInt(ctx.font.match(/(\d+)px/)[1], 10); ctx.fillStyle = acc; font(ctx, size * 0.55, 700); text(ctx, "*", 54 + bw, 780 + y - size * 0.27); }
+    ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, 30, 600, BODY); spaced(ctx, t.sub, 66, 835 + y, 5);
+    const sy = 890 + y;
+    ctx.fillStyle = rgba(mix(BG, "#000000", 0.35), 0.92); roundRect(ctx, 44, sy, 600, 112, 18); ctx.fill();
+    ctx.strokeStyle = rgba(acc, 0.35); ctx.lineWidth = 2; roundRect(ctx, 44, sy, 600, 112, 18); ctx.stroke();
+    ctx.fillStyle = acc; roundRect(ctx, 44, sy, 8, 112, 4); ctx.fill();
     t.stats.forEach(([v, l], i) => {
-      const X = 80 + i * 210;
-      if (i) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(X - 26, sy + 22, 2, 60); }
-      ctx.fillStyle = "#FFFFFF"; fit(ctx, String(v), 180, 54, 700); text(ctx, String(v), X, sy + 62);
-      ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 17, 700, BODY); spaced(ctx, l.toUpperCase(), X, sy + 88, 2);
+      const X = 80 + i * 196;
+      if (i) { ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.fillRect(X - 26, sy + 22, 2, 68); }
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, String(v), 160, 56, 700); text(ctx, String(v), X, sy + 62);
+      ctx.fillStyle = acc; fit(ctx, l.toUpperCase(), 160, 21, 700, BODY, 14); spaced(ctx, l.toUpperCase(), X, sy + 94, 2);
     });
-    ctx.fillStyle = "#FFFFFF"; font(ctx, 24, 700, BODY); spaced(ctx, `${d.player.teamShort || ""} V ${d.opponentShort || ""}`, W - 76, sy + 52, 4, "right");
-    ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 15, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 76, sy + 82, 4, "right");
+    // The name under the photo, on the right.
+    nameBlock(ctx, d, t, W - 60, nameTop, acc);
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 20, 700, BODY); spaced(ctx, `${d.player.teamShort || ""} V ${d.opponentShort || ""}`, 64, H - 70, 4);
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 15, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", 64, H - 42, 4);
     grain(ctx, W, H, 0.06);
+  }
+
+  // A player's name, right-aligned at x under the photo: the first name in script over the surname.
+  const SCRIPT = '"Kaushan Script", "Brush Script MT", cursive';
+  function nameBlock(ctx, d, t, x, top, acc) {
+    if (t.first) { ctx.save(); ctx.fillStyle = acc; fit(ctx, t.first, 520, 88, 400, SCRIPT, 30); ctx.translate(x - 16, top + 52); ctx.rotate(-0.05); text(ctx, t.first, 0, 0, "right"); ctx.restore(); }
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, t.last.toUpperCase(), 620, 112, 700); text(ctx, t.last.toUpperCase(), x, top + 160, "right");
   }
 
   // Split: a jersey-colour panel with the type stacked on it, the photo beside it on an angled cut.
@@ -1369,7 +1376,7 @@
     const [W, H] = SIZES[size] || SIZES.post;
     if (!stylesFor(kind).some(([k]) => k === style)) style = stylesFor(kind)[0][0];
     if (root.document && document.fonts) {
-      await Promise.all(["700 100px Oswald", "600 100px Oswald", "500 100px Oswald", '500 30px "DM Sans"', '600 30px "DM Sans"', '700 30px "DM Sans"'].map((f) => document.fonts.load(f))).catch(() => {});
+      await Promise.all(["400 60px \"Kaushan Script\"", "700 100px Oswald", "600 100px Oswald", "500 100px Oswald", '500 30px "DM Sans"', '600 30px "DM Sans"', '700 30px "DM Sans"'].map((f) => document.fonts.load(f))).catch(() => {});
     }
     const u = d.urls || {};
     // Sponsors: d.sponsors [{name, url}], or the older single d.sponsor with urls.sponsor.
