@@ -271,10 +271,11 @@
             <div class="row-2"><button class="btn" data-act="refresh-match">Refresh</button><button class="btn" data-act="resume-cloud">Score here again</button></div></div>`
         : `<div class="watch"><p class="muted">Live score from the ground.</p><button class="btn" data-act="refresh-match">Refresh</button></div>`;
     }
-    return `<header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
+    // The whole pad fits one screen: score on top, keypad and tools at the bottom under the thumb.
+    return `<div class="score-screen"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
         <h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small" data-act="card">Scorecard</button></header>
       ${scoreboard(s)}
-      <section class="wrap stack-s">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section>`;
+      <section class="wrap stack-s score-body">${s.next === "done" ? "" : playersBlock(s)}${action}${tools}</section></div>`;
   }
 
   // ---------- Hand over and backup links (quick matches) ----------
