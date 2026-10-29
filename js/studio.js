@@ -211,16 +211,27 @@
     return { kind: "versus", data: d, title: `${tms[0].short_name} v ${tms[1].short_name}` };
   }
 
-  function tableCard(T, group) {
+  // A team's last results, oldest first: W, L, T (tie) or N (no result).
+  function formOf(id, ms) {
+    return ms.filter((m) => (m.team1_id === id || m.team2_id === id) && (m.status === "done" || m.status === "abandoned"))
+      .sort((a, b) => String(a.starts_at || "").localeCompare(String(b.starts_at || ""))).slice(-5)
+      .map((m) => m.status === "abandoned" ? "N" : !m.winner_team_id ? "T" : m.winner_team_id === id ? "W" : "L");
+  }
+
+  async function tableCard(T, group) {
     const ti = tournamentInfo(T.t);
     const ids = T.teams.filter((t) => (t.group || "") === group).map((t) => t.id);
     const ms = T.matches.filter((m) => T.t.kind === "series" || m.stage === "group");
-    const rows = St.pointsTable(ids, ms).map((r) => {
+    const table = St.pointsTable(ids, ms);
+    const rows = table.map((r) => {
       const t = lg.teamById(r.id);
-      return { name: t.name, short: t.short_name, c1: t.primary_color, c2: t.secondary_color, logo: url("logos", t.logo_path), p: r.p, w: r.w, l: r.l, pts: r.pts, nrr: (r.nrr > 0 ? "+" : r.nrr < 0 ? "−" : "") + Math.abs(r.nrr).toFixed(3) };
+      return { name: t.name, short: t.short_name, c1: t.primary_color, c2: t.secondary_color, logo: url("logos", t.logo_path), p: r.p, w: r.w, l: r.l, pts: r.pts, nrr: (r.nrr > 0 ? "+" : r.nrr < 0 ? "−" : "") + Math.abs(r.nrr).toFixed(3), form: formOf(r.id, ms) };
     });
     const d = base({ ti }, { table: { group, rows, qualify: 2 } });
     d.urls.teams = rows.map((r) => r.logo);
+    // The leader's captain, for the Leader look.
+    const caps = table.length ? await captainPhotos([table[0].id]).catch(() => new Map()) : new Map();
+    d.urls.caps = table.length ? [caps.get(table[0].id) || ""] : [];
     return { kind: "table", data: d, title: group ? `Points table, group ${group}` : "Points table" };
   }
 
@@ -668,7 +679,7 @@
       if (ms) show(await milestoneCard(rec, ms), "score");
     },
     "card-vs"(d) { const m = L.tour.matches.find((x) => x.id === d.id); if (m) versusCard(L.tour, m).then((c) => show(c, "tour")); },
-    "card-table"(d) { show(tableCard(L.tour, d.g || ""), "tour"); },
+    "card-table"(d) { tableCard(L.tour, d.g || "").then((c) => show(c, "tour")); },
     "card-schedule"(d) { const p = matchDays(L.tour)[+d.i]; if (p) scheduleCard(L.tour, p).then((c) => show(c, "tour")); },
     "card-groups"(d) { groupsCard(L.tour, +d.p || 0, d.g || "").then((c) => show(c, "tour")); },
     async "card-award"(d) { ui.toast("Making the card…"); const card = await awardCard(L.tour, d.k); if (card) show(card, "tour"); },
