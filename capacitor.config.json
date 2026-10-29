@@ -1,6 +1,6 @@
 {
   "appId": "io.github.suborhan7.cricketscorer",
-  "appName": "Cricket Scorer",
+  "appName": "CricPulse",
   "webDir": "www",
   "server": {
     "url": "https://cricket-scoring-app-two.vercel.app",

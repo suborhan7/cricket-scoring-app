@@ -17,8 +17,10 @@
   ];
   const PRESETS = [["T10", 10], ["T20", 20], ["50 overs", 50]];
 
-  const APP = (CSA.config && CSA.config.appName) || "Cricket Scorer";
+  const APP = (CSA.config && CSA.config.appName) || "CricPulse";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // The name with its last part in the accent colour, for the top bar.
+  const BRAND = esc(APP).replace(/(Pulse)$/, '<span class="brand-accent">$1</span>');
   const shortName = (name) => {
     const w = name.trim().split(/\s+/);
     return (w.length > 1 ? w.map((x) => x[0]).join("") : name.slice(0, 3)).toUpperCase().slice(0, 4);
@@ -102,7 +104,7 @@
   // Without the online part (league.js) home is just quick matches on this phone.
   function homeView() {
     if (CSA.ui.screens.home) return CSA.ui.screens.home(view);
-    return `<header class="bar"><h1 class="brand">${esc(APP)}</h1></header>
+    return `<header class="bar"><h1 class="brand">${BRAND}</h1></header>
       <section class="wrap stack">
         ${installBanner()}
         <button class="btn btn-primary" data-act="new">Score a match</button>
@@ -649,7 +651,7 @@
 
   // Shared with league.js, which adds accounts, tournaments and syncing on top of these screens.
   CSA.ui = {
-    esc, toast, shortName, PRESETS, actions, render, APP, localMatches, installBanner,
+    esc, toast, shortName, PRESETS, actions, render, APP, BRAND, localMatches, installBanner,
     screens: {},
     tabbar: () => "",
     cloudHandover: () => toast("Sign in to hand over a tournament match."),

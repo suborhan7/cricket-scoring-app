@@ -60,7 +60,7 @@
     const right = L.user
       ? `${themeBtn()}${CSA.alerts ? CSA.alerts.bell() : ""}<button class="me-btn" data-act="nav" data-tab="profile" aria-label="Your profile">${meAvatar()}</button>`
       : `${themeBtn()}<button class="btn btn-small" data-act="account">Sign in</button>`;
-    return `<header class="bar topbar"><img class="brand-mark" src="icons/icon-192.png" alt=""><h1 class="brand-name">${esc(ui.APP)}</h1><span class="row-end">${right}</span></header>`;
+    return `<header class="bar topbar"><img class="brand-mark" src="icons/icon-192.png" alt=""><h1 class="brand-name">${ui.BRAND}</h1><span class="row-end">${right}</span></header>`;
   }
 
   const tourRow = (t) => `<li><button class="t-row" data-act="t-open" data-id="${t.id}">${badge(t)}
