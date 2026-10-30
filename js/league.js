@@ -311,12 +311,19 @@
     const f = form("tnew", { kind: "tournament", overs: 20, custom: false, maxBowler: 4, c1: "#0F7A45", c2: "#0E1A14" });
     const chips = ui.PRESETS.map(([l, n]) => `<button class="chip ${!f.custom && +f.overs === n ? "on" : ""}" data-act="tnew-overs" data-n="${n}">${l}</button>`).join("");
     const editing = !!f.editId;
-    const sponsor = editing ? `<div class="card stack-s"><span class="eyebrow">Sponsor on cards</span>
-        <div class="chips"><button class="chip ${f.showSponsor ? "on" : ""}" data-act="tnew-sponsor" data-v="1">Show sponsor</button><button class="chip ${f.showSponsor ? "" : "on"}" data-act="tnew-sponsor" data-v="0">Hide</button></div>
-        ${f.showSponsor ? `${field("Sponsor name", `<input data-f="tnew.sponsorName" value="${esc(f.sponsorName || "")}" maxlength="40" placeholder="Optional">`)}
-        <div class="logo-pick">${f.sponsorUrl ? `<img class="logo logo-l" src="${f.sponsorUrl}" alt="Sponsor logo preview">` : `<span class="logo logo-l logo-empty">Logo</span>`}
-          <label class="btn btn-small file-btn">${f.sponsorUrl ? "Change sponsor logo" : "Upload sponsor logo"}<input type="file" accept="image/*" data-sponsor="1" hidden></label></div>` : ""}
-      </div>` : "";
+    // Asked on every new tournament: sponsors added here go on every card the studio makes for it.
+    const sps = f.sponsors || [];
+    const spRow = (sp, i) => `<div class="sponsor-row">
+        ${sp.url ? `<img src="${esc(sp.url)}" alt="Sponsor logo">` : `<span class="logo logo-empty">Logo</span>`}
+        <input data-sponsor-name="${i}" value="${esc(sp.name || "")}" maxlength="40" placeholder="Sponsor name (optional)" aria-label="Sponsor ${i + 1} name">
+        <button class="chip-x" data-act="tnew-sponsor-remove" data-i="${i}" aria-label="Remove sponsor">✕</button></div>`;
+    const sponsor = `<div class="card stack-s"><span class="eyebrow">Sponsors</span>
+        <p class="small">Does this ${f.kind === "series" ? "series" : "tournament"} have sponsors?</p>
+        <div class="chips"><button class="chip ${f.hasSponsors === true ? "on" : ""}" data-act="tnew-sponsor" data-v="1">Yes, add logos</button><button class="chip ${f.hasSponsors === false ? "on" : ""}" data-act="tnew-sponsor" data-v="0">No sponsors</button></div>
+        ${f.hasSponsors ? `<small class="muted">Their logos go on every poster made for this ${f.kind === "series" ? "series" : "tournament"}: fifty cards, squads, VS, points table, leaders and the rest. Up to 4.</small>
+        ${sps.map(spRow).join("")}
+        ${sps.length < 4 ? `<label class="btn btn-small file-btn">+ Add sponsor logo<input type="file" accept="image/*" data-sponsor="1" hidden></label>` : ""}` : ""}
+      </div>`;
     return bar(editing ? "Edit tournament" : "New tournament", editing ? "t-open" : "home", editing ? `data-id="${f.editId}"` : "") + `<section class="wrap stack">
       <div class="card stack-s">
         ${editing ? "" : `<div class="chips"><button class="chip ${f.kind === "tournament" ? "on" : ""}" data-act="tnew-kind" data-k="tournament">Tournament</button><button class="chip ${f.kind === "series" ? "on" : ""}" data-act="tnew-kind" data-k="series">Series (two teams)</button></div>`}
@@ -340,6 +347,34 @@
   };
 
   const cleanHandle = (h) => String(h || "").trim().replace(/^@+/, "").toLowerCase();
+
+  // A tournament's sponsors as [{name, logo_path}]: the list from migration 0016, or the single sponsor from 0007.
+  function sponsorsOf(t) {
+    if (!t || t.show_sponsor === false) return [];
+    if (Array.isArray(t.sponsors) && t.sponsors.length) return t.sponsors;
+    return t.sponsor_name || t.sponsor_logo_path ? [{ name: t.sponsor_name || "", logo_path: t.sponsor_logo_path || "" }] : [];
+  }
+
+  // Sponsors save on their own so the rest of the tournament saves without migration 0016.
+  // Returns "" or a note for the toast.
+  async function saveSponsors(id, f) {
+    const list = [];
+    if (f.hasSponsors) {
+      for (const sp of f.sponsors || []) {
+        const logo_path = sp.blob ? await upload("logos", sp.blob) : sp.path || "";
+        const name = (sp.name || "").trim().slice(0, 40);
+        if (logo_path || name) list.push(Object.assign(name ? { name } : {}, logo_path ? { logo_path } : {}));
+      }
+    }
+    const on = list.length > 0, first = list[0] || {};
+    // The 0007 columns are kept in step with the first sponsor, so older copies of the app still show one.
+    const legacy = { show_sponsor: on, sponsor_name: first.name || null, sponsor_logo_path: first.logo_path || null };
+    const r = await sb.from("tournaments").update(Object.assign({ sponsors: list }, legacy)).eq("id", id);
+    if (!r.error) return "";
+    const r2 = await sb.from("tournaments").update(legacy).eq("id", id);
+    if (r2.error) return "Sponsors need a database update first.";
+    return list.length > 1 ? "Only the first sponsor was saved: more need a database update first." : "";
+  }
 
   async function saveTournament() {
     const f = form("tnew");
@@ -367,14 +402,10 @@
       if (f.editId) {
         const { error } = await sb.from("tournaments").update(row).eq("id", f.editId);
         if (error) throw error;
-        // Sponsor fields go separately: they need migration 0007, and the rest should save without it.
-        const sp = { show_sponsor: !!f.showSponsor, sponsor_name: (f.sponsorName || "").trim() || null };
-        if (f.sponsorBlob) sp.sponsor_logo_path = await upload("logos", f.sponsorBlob);
-        const r2 = await sb.from("tournaments").update(sp).eq("id", f.editId);
+        const spErr = await saveSponsors(f.editId, f);
         const hErr = await saveHandle(f.editId);
         if (hErr && handle) { f.busy = false; f.error = hErr; return ui.render(); }
-        if (r2.error) ui.toast("Saved. The sponsor settings need a database update first.");
-        else ui.toast("Tournament saved");
+        ui.toast(spErr ? `Saved. ${spErr}` : "Tournament saved");
         const id = f.editId;
         L.forms.tnew = null;
         loadMine();
@@ -384,9 +415,10 @@
       const { data, error } = await sb.from("tournaments").insert(row).select().single();
       if (error) throw error;
       const hErr = handle ? await saveHandle(data.id) : "";
+      const spErr = f.hasSponsors && (f.sponsors || []).length ? await saveSponsors(data.id, f) : "";
       L.forms.tnew = null;
       loadMine();
-      ui.toast(hErr ? `${data.name} created. ${hErr}` : `${data.name} created`);
+      ui.toast(hErr || spErr ? `${data.name} created. ${hErr || spErr}` : `${data.name} created`);
       openTour(data.id);
     } catch (e) { f.busy = false; f.error = errText(e); ui.render(); }
   }
@@ -1052,7 +1084,8 @@
       L.forms.tnew = { editId: t.id, kind: t.kind, name: t.name, short: t.short_name || "", c1: t.primary_color || "#0F7A45", c2: t.secondary_color || "#0E1A14", colorsEdited: true,
         logoUrl: t.logo_path ? publicUrl("logos", t.logo_path) : "", overs: t.overs_per_side, custom: !preset, maxBowler: t.max_overs_per_bowler || Math.ceil(t.overs_per_side / 5),
         handle: t.handle || "", open: t.open_to_requests !== false,
-        showSponsor: t.show_sponsor !== false, sponsorName: t.sponsor_name || "", sponsorUrl: t.sponsor_logo_path ? publicUrl("logos", t.sponsor_logo_path) : "" };
+        sponsors: sponsorsOf(t).map((sp) => ({ name: sp.name || "", path: sp.logo_path || "", url: sp.logo_path ? publicUrl("logos", sp.logo_path) : "" })) };
+      L.forms.tnew.hasSponsors = L.forms.tnew.sponsors.length > 0;
       ui.go("tnew");
     },
     async "feed-open"(d) { await openTour(d.t, "matches"); await openMatch(d.id); },
@@ -1075,7 +1108,8 @@
       if (error) ui.toast(errText(error));
     },
     "stat-kind"(d) { L.tour.statKind = d.k; ui.render(); },
-    "tnew-sponsor"(d) { form("tnew").showSponsor = d.v === "1"; ui.render(); },
+    "tnew-sponsor"(d) { form("tnew").hasSponsors = d.v === "1"; ui.render(); },
+    "tnew-sponsor-remove"(d) { form("tnew").sponsors.splice(+d.i, 1); ui.render(); },
     "tnew-open"(d) { form("tnew").open = d.v === "1"; ui.render(); },
     "t-open"(d) { openTour(d.id); },
     async "req-answer"(d) {
@@ -1141,6 +1175,7 @@
 
   // Form fields write straight into their form's state, so re-rendering never loses typing.
   document.addEventListener("input", (ev) => {
+    if (ev.target.dataset.sponsorName) { const sp = (form("tnew").sponsors || [])[+ev.target.dataset.sponsorName]; if (sp) sp.name = ev.target.value; return; }
     const key = ev.target.dataset.f;
     if (!key) return;
     const [name, prop] = key.split(".");
@@ -1155,7 +1190,7 @@
     const t = ev.target;
     if (t.dataset.logo) pickLogo(t, form(t.dataset.logo), t.dataset.logo);
     if (t.dataset.sponsor && t.files && t.files[0]) {
-      shrink(t.files[0], 512).then((out) => { const f = form("tnew"); f.sponsorBlob = out.blob; f.sponsorUrl = out.url; ui.render(); })
+      shrink(t.files[0], 512).then((out) => { const f = form("tnew"); f.sponsors = (f.sponsors || []).concat({ name: "", blob: out.blob, url: out.url }).slice(0, 4); ui.render(); })
         .catch(() => ui.toast("That file couldn't be read as an image."));
     }
     if (t.dataset.csv && t.files && t.files[0]) {
@@ -1178,7 +1213,7 @@
   });
 
   // Shared with squad.js (team and player pages).
-  CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, errText, shrink, upload, logoPicker, colorPair,
+  CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, sponsorsOf, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
     openMatch, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 

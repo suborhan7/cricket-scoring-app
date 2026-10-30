@@ -78,7 +78,7 @@ button { cursor: pointer; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; margin: 0; min-width: 0; }
 .card legend { padding: 0 4px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 0.92rem; }
-.field input, .field select, .field textarea { border: 1.5px solid var(--line); border-radius: 8px; padding: 11px 12px; background: var(--paper); font-weight: 500; font-size: 1rem; width: 100%; min-height: 48px; }
+.field input, .field select, .field textarea, .sponsor-row input { border: 1.5px solid var(--line); border-radius: 8px; padding: 11px 12px; background: var(--paper); font-weight: 500; font-size: 1rem; width: 100%; min-height: 48px; }
 .field textarea { resize: vertical; line-height: 1.5; }
 
 /* Home */
@@ -306,6 +306,9 @@ button { cursor: pointer; }
 .card-preview { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px; display: grid; place-items: center; min-height: 240px; }
 .card-preview img { display: block; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
 .card-preview.story img { max-width: 300px; }
+.sponsor-row { display: flex; align-items: center; gap: 10px; }
+.sponsor-row img, .sponsor-row .logo-empty { width: 56px; height: 56px; flex: none; border-radius: 12px; object-fit: contain; background: #fff; padding: 4px; }
+.sponsor-row input { flex: 1; min-width: 0; }
 .sponsor-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 8px; }
 .sponsor-chip img { height: 32px; max-width: 72px; object-fit: contain; background: #fff; border-radius: 6px; padding: 2px; }
 .chip-x { border: 0; background: transparent; color: inherit; min-width: 36px; min-height: 36px; border-radius: 999px; font-size: 1rem; }
