@@ -52,7 +52,7 @@ test("engagement card captions", () => {
 
 test("milestone cards have Spotlight and Split; other player cards Broadcast and Poster; the rest all three looks", () => {
   assert.deepEqual(C.stylesFor("potm"), [["H", "Halo"], ["S", "Spotlight"], ["P", "Split"]]);
-  assert.deepEqual(C.stylesFor("award").map(([k]) => k), ["A", "B"]);
+  assert.deepEqual(C.stylesFor("award"), [["C", "Crown"], ["G", "Gold"], ["F", "Frame"]]);
   assert.deepEqual(C.stylesFor("schedule"), [["T", "Timeline"], ["W", "Showdown"]]);
   assert.deepEqual(C.stylesFor("groups"), [["B", "Bands"], ["D", "Draw"], ["S", "Showcase"]]);
   assert.deepEqual(C.stylesFor("lineup"), [["D", "Duel"], ["P", "Split"], ["S", "Sheet"]]);
