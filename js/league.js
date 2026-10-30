@@ -115,7 +115,7 @@
       }));
     }
     L.myTeams = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
-    rerender("home", "teams", "profile");
+    rerender("home", "teams", "profile", "tour");
   }
 
   // ---------- Live and recent matches (everyone, signed in or not) ----------
@@ -483,14 +483,28 @@
         <span class="req-btns"><button class="btn btn-small" data-act="req-answer" data-id="${r.id}" data-ok="0">Decline</button><button class="btn btn-small btn-primary" data-act="req-answer" data-id="${r.id}" data-ok="1">Accept</button></span></li>`).join("")}</ul>`;
   }
 
-  // Everyone else: a captain asks to put their team in.
+  // Everyone else: a captain asks to put their team in. Teams of theirs already in, or
+  // waiting, show their status; the card only shows while they have a team left to enter.
   function askToJoin(T) {
     if (L.user && T.requests === undefined) { loadRequests(); T.requests = null; }
+    if (L.user && (L.myTeams == null || T.requests == null)) return ""; // still loading
+    const name = esc(T.t.short_name || T.t.name);
+    const inTour = new Set(T.teams.map((tm) => tm.id));
     // The rules only return requests this user sent or whose team they run.
-    const waiting = (T.requests || []).map((r) => r.teams.name);
-    if (waiting.length) return `<p class="note">Waiting for the organiser to accept ${esc(waiting.join(", "))}.</p>`;
-    if (T.t.open_to_requests === false) return `<p class="muted small">Teams join this tournament by the organiser's invite link.</p>`;
-    return `<div class="card stack-s join-card"><b>Want your team in ${esc(T.t.short_name || T.t.name)}?</b>
+    const waitIds = new Set((T.requests || []).map((r) => r.teams.id));
+    const mine = L.myTeams || [];
+    const playing = mine.filter((tm) => inTour.has(tm.id)).map((tm) => tm.name);
+    const waiting = (T.requests || []).filter((r) => !inTour.has(r.teams.id)).map((r) => r.teams.name);
+    const free = mine.filter((tm) => tm.manage && !inTour.has(tm.id) && !waitIds.has(tm.id));
+    const runsAny = mine.some((tm) => tm.manage);
+    let out = "";
+    if (playing.length) out += `<p class="note">${esc(playing.join(", ").replace(/, ([^,]*)$/, " and $1"))} ${playing.length === 1 ? "is" : "are"} playing in ${name}.</p>`;
+    if (waiting.length) out += `<p class="note">Waiting for the organiser to accept ${esc(waiting.join(", "))}.</p>`;
+    // Every team they run is already in or waiting, or they play for a team that's in.
+    if (L.user && (runsAny ? !free.length : playing.length)) return out;
+    if (T.t.open_to_requests === false) return out + `<p class="muted small">Teams join this tournament by the organiser's invite link.</p>`;
+    const another = playing.length || waiting.length;
+    return out + `<div class="card stack-s join-card"><b>${another ? `Put another team in ${name}?` : `Want your team in ${name}?`}</b>
       <p class="muted small">Captains send a request, and the organiser accepts it.</p>
       <button class="btn btn-primary" data-act="tj-request">Ask to join</button></div>`;
   }
