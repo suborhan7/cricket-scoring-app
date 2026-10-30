@@ -467,8 +467,12 @@
   // Tournament awards: player of the tournament (MVP points), best batter (runs), best bowler (wickets).
   const AWARDS = {
     mvp: { title: "Player of the tournament", k1: "PLAYER OF THE", k2: "TOURNAMENT", pick: (T) => St.tournamentMvp(T.matches)[0],
-      card: (x) => ({ badge: String(x.pts), badgeLabel: "MVP PTS", line: `${x.played} match${x.played === 1 ? "" : "es"}`,
-        stats: [[String(x.runs), "", "Runs"], [String(x.wickets), "", x.wickets === 1 ? "Wicket" : "Wickets"], [x.balls ? ((x.runs * 100) / x.balls).toFixed(0) : "–", "", "Strike rate"]] }) },
+      // The headline is their runs, their wickets, or both; the MVP points move to the stats.
+      card: (x) => {
+        const badges = [x.runs || !x.wickets ? [String(x.runs), "RUNS"] : null, x.wickets ? [String(x.wickets), x.wickets === 1 ? "WICKET" : "WICKETS"] : null].filter(Boolean);
+        return { badge: badges[0][0], badgeLabel: badges[0][1], badges, line: `${x.played} match${x.played === 1 ? "" : "es"}`,
+          stats: [[String(x.pts), "", "MVP pts"], [String(x.played), "", x.played === 1 ? "Match" : "Matches"], [x.balls ? ((x.runs * 100) / x.balls).toFixed(0) : "–", "", "Strike rate"]] };
+      } },
     bat: { title: "Best batter", k1: "BEST", k2: "BATTER", big: "MOST RUNS", pick: (T) => St.leaders(T.matches).runs[0],
       card: (x) => ({ badge: String(x.runs), badgeLabel: "RUNS", line: `${x.inns} innings`,
         stats: [[x.sr.toFixed(1), "", "Strike rate"], [`${x.best}${x.bestOut ? "" : "*"}`, "", "Best"], [String(x.sixes), "", x.sixes === 1 ? "Six" : "Sixes"]] }) },

@@ -2181,6 +2181,7 @@
       ctx.fillStyle = acc; font(ctx, Math.min(18, h * 0.17), 700, BODY); spaced(ctx, String(l).toUpperCase(), cx + 2, y + h * 0.82, 3, "center");
     });
   }
+  const awardBadges = (a) => (a.badges && a.badges.length ? a.badges : [[a.badge || "", a.badgeLabel || ""]]).slice(0, 2);
   function awardHead(ctx, W, d, y, acc) {
     ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, y, 10, "center");
     sponsorRow(ctx, d, W - 50, y - 6, "right", "rgba(255,255,255,0.55)");
@@ -2202,9 +2203,11 @@
     ctx.save(); ctx.translate(W / 2, 240 + dy * 0.2); ctx.transform(1, 0, -0.18, 1, 0, 0); fit(ctx, a.k2 || "", W - 100, 120, 700); ctx.textAlign = "center";
     ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillText(a.k2 || "", 6, 8); const gt = ctx.createLinearGradient(0, -100, 0, 0); gt.addColorStop(0, "#FFF6D6"); gt.addColorStop(1, A.gold); ctx.fillStyle = gt; ctx.fillText(a.k2 || "", 0, 0); ctx.restore();
     // The big number on a medal at the side.
-    const mx = W - 150, my = cy + r * 0.55; ctx.beginPath(); ctx.arc(mx, my, 92, 0, 7); ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.stroke();
-    ctx.fillStyle = "#1A1405"; fit(ctx, a.badge || "", 150, 76, 700); text(ctx, a.badge || "", mx, my + 22, "center");
-    font(ctx, 16, 700, BODY); spaced(ctx, a.badgeLabel || "", mx + 2, my + 50, 2, "center");
+    awardBadges(a).forEach(([v, l], i, B) => {
+      const mx = W - 150, my = cy + r * 0.55 - (B.length - 1 - i) * 210; ctx.beginPath(); ctx.arc(mx, my, 92, 0, 7); ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.stroke();
+      ctx.fillStyle = "#1A1405"; fit(ctx, v, 150, 76, 700); text(ctx, v, mx, my + 22, "center");
+      font(ctx, 16, 700, BODY); spaced(ctx, l, mx + 2, my + 50, 2, "center");
+    });
     if (img) logo(ctx, d.images.teams[0], { name: d.player.team, short: d.player.teamShort, c1: d.player.c1, c2: d.player.c2 }, 150, cy + r * 0.55, 130);
     awardName(ctx, d.player.name, W / 2, H - 250, W - 120, "center", A.gold, 96);
     ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, a.line || "", W - 160, 24, 600, BODY); text(ctx, a.line || "", W / 2, H - 206, "center");
@@ -2228,10 +2231,13 @@
     ctx.fillStyle = "#FFFFFF"; font(ctx, 34, 700, BODY); spaced(ctx, a.k1 || "", 62, 170 + dy * 0.15, 8);
     ctx.fillStyle = gold; fit(ctx, a.k2 || "", W * 0.62, 130, 700); text(ctx, a.k2 || "", 56, 290 + dy * 0.15);
     // The seal.
-    const sx = 190, sy = 500 + dy * 0.3, sr = 120; ctx.save(); ctx.translate(sx, sy); ctx.beginPath(); for (let i = 0; i < 48; i++) { const rr = i % 2 ? sr : sr * 0.9, an = (i / 48) * Math.PI * 2; ctx.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } ctx.closePath(); ctx.fillStyle = gold; ctx.fill(); ctx.restore();
-    ctx.beginPath(); ctx.arc(sx, sy, sr * 0.74, 0, 7); ctx.strokeStyle = "rgba(26,20,5,0.5)"; ctx.lineWidth = 3; ctx.stroke();
-    ctx.fillStyle = "#1A1405"; fit(ctx, a.badge || "", sr * 1.3, 96, 700); text(ctx, a.badge || "", sx, sy + 26, "center"); font(ctx, 18, 700, BODY); spaced(ctx, a.badgeLabel || "", sx + 2, sy + 58, 3, "center");
-    if (img) logo(ctx, d.images.teams[0], team, sx, sy + sr + 90, 110);
+    const B = awardBadges(a), sx = 190, sr = B.length > 1 ? 104 : 120, sy0 = (B.length > 1 ? 470 : 500) + dy * 0.3;
+    B.forEach(([v, l], i) => {
+      const sy = sy0 + i * (sr * 2 + 30); ctx.save(); ctx.translate(sx, sy); ctx.beginPath(); for (let k = 0; k < 48; k++) { const rr = k % 2 ? sr : sr * 0.9, an = (k / 48) * Math.PI * 2; ctx.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } ctx.closePath(); ctx.fillStyle = gold; ctx.fill(); ctx.restore();
+      ctx.beginPath(); ctx.arc(sx, sy, sr * 0.74, 0, 7); ctx.strokeStyle = "rgba(26,20,5,0.5)"; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = "#1A1405"; fit(ctx, v, sr * 1.3, sr * 0.8, 700); text(ctx, v, sx, sy + sr * 0.22, "center"); font(ctx, 18, 700, BODY); spaced(ctx, l, sx + 2, sy + sr * 0.48, 3, "center");
+    });
+    if (img && B.length < 2) logo(ctx, d.images.teams[0], team, sx, sy0 + sr + 90, 110);
     awardName(ctx, d.player.name, 60, H - 260, W - 120, "left", A.gold, 104);
     ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, a.line || "", W - 160, 24, 600, BODY); text(ctx, a.line || "", 62, H - 214);
     awardStats(ctx, a, 50, H - 185, W - 100, 124, A.gold, true);
@@ -2254,8 +2260,10 @@
     ctx.restore();
     slant(ctx, fx, fy, fw, fh, sk); ctx.strokeStyle = acc; ctx.lineWidth = 4; ctx.stroke();
     if (img) logo(ctx, d.images.teams[0], team, fx + fw - 90, fy + 90, 120);
-    ctx.fillStyle = acc; roundRect(ctx, fx + fw - 170, fy + fh - 220, 160, 150, 18); ctx.fill();
-    ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; fit(ctx, a.badge || "", 140, 80, 700); text(ctx, a.badge || "", fx + fw - 90, fy + fh - 128, "center"); font(ctx, 16, 700, BODY); spaced(ctx, a.badgeLabel || "", fx + fw - 88, fy + fh - 92, 2, "center");
+    awardBadges(a).forEach(([v, l], i, B) => {
+      const by = fy + fh - 220 - (B.length - 1 - i) * 170; ctx.fillStyle = acc; roundRect(ctx, fx + fw - 170, by, 160, 150, 18); ctx.fill();
+      ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; fit(ctx, v, 140, 80, 700); text(ctx, v, fx + fw - 90, by + 92, "center"); font(ctx, 16, 700, BODY); spaced(ctx, l, fx + fw - 88, by + 128, 2, "center");
+    });
     const ny = fy + fh - 30, nh = 130; slant(ctx, 40, ny, W - 80, nh, 30); ctx.fillStyle = "#FFFFFF"; ctx.fill();
     ctx.fillStyle = A.base; slant(ctx, 40, ny, 30 + 30, nh, 30); ctx.fill();
     const w = String(d.player.name).trim().split(/\s+/), last = (w.pop() || "").toUpperCase(), first = w.join(" ");
