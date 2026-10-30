@@ -10,5 +10,8 @@ window.CSA = Object.assign(window.CSA || {}, {
     supabaseKey: "sb_publishable_lrQQ49m6cessvzu1yqaXoA_SBv44JEh",
     // Turn on after enabling the Google provider in Supabase (Authentication → Sign In / Providers).
     googleLogin: false,
+    // Web Push public key (VAPID). Public by design; its private half is a secret of the
+    // "push" Edge Function (supabase/functions/push).
+    pushKey: "BDm74Zs38RpPKEMz5fXk85VfKzBRj1-3CVCy3ngvVsuP_2i5sewJxwCXfWljXmmo5mg_sNpwymr8VAgEe2YM9uI",
   },
 });

@@ -399,5 +399,38 @@ do $$ begin
 exception when no_data_found then null;
 end $$;
 
+-- Following and live alerts: a fan follows a team, the scorer's wicket alert reaches them once,
+-- strangers can't send alerts or see someone else's follows, and a phone moves to its new user.
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+insert into public.follows (kind, target) values ('team', '20000000-0000-0000-0000-000000000002');
+select pg_temp.blocked($q$insert into public.follows (user_id, kind, target) values ('00000000-0000-0000-0000-00000000000b', 'match', '40000000-0000-0000-0000-000000000001')$q$);
+select pg_temp.act('00000000-0000-0000-0000-000000000011');
+do $$ begin
+  perform public.notify_followers('40000000-0000-0000-0000-000000000001', 'wicket', 'W', 'x', 'w:0:1');
+  raise exception 'a fan sent a live alert';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+select public.save_push('web', 'https://push.example.com/send/abcdefghijklmnop', '{"p256dh":"k","auth":"a"}');
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+do $$ begin
+  if (select count(*) from public.follows) <> 0 then raise exception 'saw another user''s follows'; end if;
+  if (select count(*) from public.push_subscriptions) <> 0 then raise exception 'saw another user''s phone'; end if;
+  if public.notify_followers('40000000-0000-0000-0000-000000000001', 'wicket', 'Wicket', 'Rakib c Sami b Hasan 34 (22)', 'w:0:37') <> 1 then raise exception 'follower missed the wicket'; end if;
+  if public.notify_followers('40000000-0000-0000-0000-000000000001', 'wicket', 'Wicket', 'again', 'w:0:37') <> 0 then raise exception 'wicket alert sent twice'; end if;
+end $$;
+select public.save_push('web', 'https://push.example.com/send/abcdefghijklmnop', '{"p256dh":"k2","auth":"a2"}');
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  if (select count(*) from public.notifications where kind = 'live') <> 1 then raise exception 'fan has no live alert'; end if;
+  if (select count(*) from public.push_subscriptions) <> 0 then raise exception 'phone did not move to its new user'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+update public.matches set live = '{"inn":[{"team":0,"r":12,"w":1,"b":9}]}' where id = '40000000-0000-0000-0000-000000000001';
+select pg_temp.act(null);
+do $$ begin
+  if (select live ->> 'inn' from public.matches where id = '40000000-0000-0000-0000-000000000001') is null then raise exception 'fans cannot read the live score'; end if;
+end $$;
+
 reset role;
 \echo 'All security checks passed'

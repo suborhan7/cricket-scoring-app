@@ -100,7 +100,10 @@
 
     inn.runs += total; bowl.runs += charged; inn.overRuns += charged;
     if (legal) { inn.legalBalls++; bowl.balls++; }
-    inn.overs[inn.overs.length - 1].push({ label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, index, bowler: inn.bowler });
+    // batter, bat (their score after the ball) and score feed the ball-by-ball commentary.
+    const rec = { label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, index, bowler: inn.bowler,
+      batter: bat.player, hit: ex === "b" || ex === "lb" ? 0 : runs };
+    inn.overs[inn.overs.length - 1].push(rec);
 
     if (ex === "nb") inn.freeHit = rules.freeHit; else if (legal) inn.freeHit = false;
 
@@ -117,6 +120,7 @@
         inn.wickets++;
         inn.fow.push({ wicket: inn.wickets, runs: inn.runs, player: outPlayer, over: oversText(inn.legalBalls, rules.ballsPerOver) });
       }
+      rec.out = { player: outPlayer, kind: w.kind, runs: outBat.runs, balls: outBat.balls, text: dismissalText(match, inn, outBat.out) };
       if (inn.striker === outPlayer) inn.striker = null;
       else if (inn.nonStriker === outPlayer) inn.nonStriker = null;
     }
@@ -125,6 +129,8 @@
     for (const m of [50, 100]) if (before.bat < m && bat.runs >= m) s.milestones.push({ kind: m === 50 ? "fifty" : "hundred", player: bat.player, team: inn.batting, runs: bat.runs, balls: bat.balls, index });
     for (const m of [3, 5]) if (before.wkts < m && bowl.wickets >= m) s.milestones.push({ kind: m === 3 ? "threefor" : "fivefor", player: bowl.player, team: inn.bowling, wickets: bowl.wickets, runs: bowl.runs, index });
 
+    rec.score = `${inn.runs}-${inn.wickets}`; rec.ov = oversText(inn.legalBalls, rules.ballsPerOver);
+    rec.batRuns = bat.runs; rec.batBalls = bat.balls;
     const overDone = legal && inn.legalBalls % rules.ballsPerOver === 0;
     if (overDone) {
       if (inn.overRuns === 0) bowl.maidens++;

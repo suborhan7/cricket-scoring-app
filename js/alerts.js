@@ -74,13 +74,13 @@
   ui.screens.alerts = () => {
     const list = A.list || [];
     const rows = list.map((n) => `<li><button class="t-row alert-row ${n.read_at ? "" : "unread"}" data-act="alert-open" data-id="${n.id}">
-        <span class="alert-icon">${{ result: "★", milestone: "▲", join_request: "+", join_answer: "✓", team_join: "+", team_request: "+", team_answer: "✓" }[n.kind] || "•"}</span>
+        <span class="alert-icon">${{ live: "●", result: "★", milestone: "▲", join_request: "+", join_answer: "✓", team_join: "+", team_request: "+", team_answer: "✓" }[n.kind] || "•"}</span>
         <span class="t-text"><b>${esc(n.title)}</b><small>${esc(n.body)}</small><small class="alert-when">${ago(n.created_at)}</small></span>
         ${n.read_at ? "" : `<span class="dot-new" aria-label="New"></span>`}</button></li>`).join("");
     const body = A.list == null ? `<p class="muted">Loading…</p>`
       : A.error ? `<p class="error">${esc(A.error)}</p>`
       : rows ? `<ul class="t-list">${rows}</ul>`
-      : `<div class="card stack-s"><b>No alerts yet</b><p class="muted">When a player in your tournament scores a fifty or takes three wickets, or a match ends, the card shows up here ready to share. Join requests and new players in your team show up here too.</p></div>`;
+      : `<div class="card stack-s"><b>No alerts yet</b><p class="muted">When a player in your tournament scores a fifty or takes three wickets, or a match ends, the card shows up here ready to share. Join requests and new players in your team show up here too, and wickets and results from the matches, teams and tournaments you follow.</p></div>`;
     return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>Alerts</h1>
         ${unread() ? `<button class="btn btn-small bar-btn" data-act="alerts-read">Mark all read</button>` : ""}</header>
       <section class="wrap stack">${body}</section>`;
@@ -102,6 +102,7 @@
       // Joining alerts open the tournament's teams or the team; card alerts open the card.
       if (n.kind === "team_join" || n.kind === "team_request" || n.kind === "team_answer") return CSA.squad.openTeam(d2.team, "tab");
       if (n.kind === "join_request" || n.kind === "join_answer") { L.tour = null; return lg.openTour(d2.tournament, "teams"); }
+      if (n.kind === "live" && CSA.live) { L.tour = null; return CSA.live.openFromPush(d2); }
       if (CSA.studio) CSA.studio.openAlert(d2);
     },
   });

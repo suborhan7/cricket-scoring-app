@@ -284,17 +284,18 @@
       action = `<div class="watch watch-col"><p><b>Scoring moved to another phone.</b><br><span class="muted">This copy stops at the ball you handed over.</span></p>
         <button class="btn" data-act="resume-here">Score on this phone again</button></div>`;
     }
-    // Someone watching a tournament match (not its scorer) sees the score without the pad.
+    // Someone watching a tournament match (not its scorer) gets the score, then tabs with the
+    // ball-by-ball commentary, scorecard, overs, MVP and info, instead of the pad.
     if (rec.readOnly) {
       tools = "";
-      if (s.next !== "done") action = rec.handedOver
+      action = (rec.handedOver && s.next !== "done"
         ? `<div class="watch watch-col"><p><b>You handed scoring to someone else.</b><br><span class="muted">This phone follows the live score.</span></p>
             <div class="row-2"><button class="btn" data-act="refresh-match">Refresh</button><button class="btn" data-act="resume-cloud">Score here again</button></div></div>`
-        : `<div class="watch"><p class="muted">Live score from the ground.</p><button class="btn" data-act="refresh-match">Refresh</button></div>`;
+        : s.result ? `<p class="result-text">${esc(s.result.text)}</p>` : "") + fanTabs(s);
     }
     // The whole pad fits one screen: score on top, keypad and tools at the bottom under the thumb.
-    return `<div class="score-screen"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
-        <h1 class="score-title">${esc(t[0].name)} <em>v</em> ${esc(t[1].name)}</h1>${CSA.ui.matchBadge(rec)}<button class="btn btn-small btn-card" data-act="card">Scorecard</button></header>
+    return `<div class="score-screen ${rec.readOnly ? "fan" : ""}"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
+        <h1 class="score-title">${esc(t[0].name)} <em>v</em> ${esc(t[1].name)}</h1>${CSA.ui.matchBadge(rec)}${rec.readOnly ? "" : `<button class="btn btn-small btn-card" data-act="card">Scorecard</button>`}</header>
       ${scoreboard(s)}
       <section class="wrap stack-s score-body">${action}${tools}</section></div>`;
   }
@@ -442,8 +443,46 @@
 
   // ---------- Scorecard ----------
 
-  // The match page: four tabs so nobody scrolls one long page to find the overs or the MVP.
-  const SECTIONS = [["card", "Scorecard"], ["overs", "Overs"], ["mvp", "MVP"], ["info", "Info"]];
+  // The match page: tabs so nobody scrolls one long page to find the overs or the MVP.
+  const SECTIONS = [["card", "Scorecard"], ["live", "Commentary"], ["overs", "Overs"], ["mvp", "MVP"], ["info", "Info"]];
+  const FAN_SECTIONS = [["live", "Live"], ["card", "Scorecard"], ["overs", "Overs"], ["mvp", "MVP"], ["info", "Info"]];
+
+  // A fan's match page under the live score: the same tabs, with ball-by-ball commentary first.
+  function fanTabs(s) {
+    const t = rec.match.teams, sec = view.fsec || "live";
+    const played = s.innings.filter((i) => i.batters.length);
+    const nav = `<nav class="sec-tabs fan-tabs" role="tablist">${FAN_SECTIONS.map(([k, label]) => `<button class="sec-tab ${k === sec ? "on" : ""}" role="tab" aria-selected="${k === sec}" data-act="fsec" data-s="${k}">${label}</button>`).join("")}</nav>`;
+    let body;
+    if (sec === "live") body = commentaryTab(s);
+    else if (sec === "mvp") body = mvpTab(s);
+    else if (sec === "info") body = infoTab(s);
+    else if (!played.length) body = `<p class="empty">No balls bowled yet.</p>`;
+    else {
+      const tab = Math.min(view.itab == null ? played.length - 1 : view.itab, played.length - 1), inn = played[tab];
+      const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
+      body = tabs + (sec === "overs" ? oversTab(inn) : scorecardTab(inn));
+    }
+    return nav + `<div class="stack fan-body">${body}</div>`;
+  }
+
+  // Ball-by-ball, newest first, like Cricbuzz: over.ball and the ball, "Bowler to Batter, FOUR",
+  // wickets with the dismissal, a summary at the end of every over, fifties and five-fors.
+  function commentaryTab(s) {
+    const all = [].concat(...CSA.commentary.build(rec.match, s).map((x) => x.items));
+    if (!all.length) return `<p class="empty">Commentary starts with the first ball.</p>`;
+    const limit = view.more || 120, cls = { w: "b-w", 4: "b-4", 6: "b-6", x: "b-x", 0: "b-0", r: "" };
+    const rows = all.slice(0, limit).map((it) => {
+      if (it.k === "over") return `<li class="cm-over"><div class="cm-oh"><span>End of over ${it.n}</span><span><b>${it.runs} run${it.runs === 1 ? "" : "s"}</b>${it.wkts ? ` · ${it.wkts} wkt` : ""} · ${esc(it.score)}</span></div>
+          ${it.batters.length ? `<div class="cm-ob">${esc(it.batters.join(" · "))}</div>` : ""}<div class="cm-ob muted">${esc(it.bowler)}</div></li>`;
+      if (it.k === "milestone") return `<li class="cm-ms">★ ${esc(it.text)}</li>`;
+      if (it.k === "end") return `<li class="cm-end">${esc(it.text)}</li>`;
+      const [head, ...rest] = it.text.split(", ");
+      const hl = it.kind === "w" ? "cm-w" : it.kind === "4" || it.kind === "6" ? "cm-4" : "";
+      return `<li class="cm-ball ${it.kind === "w" ? "cm-wk" : ""}"><span class="cm-n">${it.n}<span class="ball ${cls[it.kind]}">${it.tag === "0" ? "•" : esc(it.tag)}</span></span>
+        <span class="cm-t"><b>${esc(it.who)},</b> <span class="${hl}">${esc(head)}</span>${rest.length ? ", " + esc(rest.join(", ")) : ""}${it.out ? `<span class="cm-out">${esc(it.out)}</span>` : ""}</span></li>`;
+    }).join("");
+    return `<ol class="cm">${rows}</ol>${all.length > limit ? `<button class="btn btn-ghost" data-act="cm-more">Show earlier balls</button>` : ""}`;
+  }
 
   function cardView() {
     const s = st(), t = rec.match.teams;
@@ -454,6 +493,7 @@
       <nav class="sec-tabs" role="tablist">${SECTIONS.map(([k, label]) => `<button class="sec-tab ${k === sec ? "on" : ""}" role="tab" aria-selected="${k === sec}" data-act="sec" data-s="${k}">${label}</button>`).join("")}</nav>`;
     const result = s.result ? `<p class="result-text">${esc(s.result.text)}</p>` : "";
     if (sec === "info") return head + `<section class="wrap stack">${result}${infoTab(s)}</section>`;
+    if (sec === "live") return head + `<section class="wrap stack">${result}${commentaryTab(s)}</section>`;
     if (sec === "mvp") return head + `<section class="wrap stack">${result}${mvpTab(s)}</section>`;
     if (!inn) return head + `<p class="empty wrap">No balls bowled yet.</p>`;
     const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
@@ -555,8 +595,10 @@
     start: startMatch,
     card() { closeSheet(); view = { screen: "card", tab: st().current, sec: "card" }; render(); },
     sec(d) { view.sec = d.s; render(); window.scrollTo(0, 0); },
+    fsec(d) { view.fsec = d.s; view.more = 0; render(); },
+    "cm-more"() { view.more = (view.more || 120) + 240; render(); },
     "back-score"() { view = { screen: "score", tab: 0 }; render(); },
-    tab(d) { view.tab = +d.n; render(); },
+    tab(d) { view.tab = view.itab = +d.n; render(); },
     run(d) { push({ t: "ball", runs: +d.n }); },
     undo,
     swap() { push({ t: "swap" }); },

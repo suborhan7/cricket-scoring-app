@@ -122,8 +122,11 @@
 
   L.feed = null;
   async function loadFeed() {
-    const { data, error } = await sb.from("matches").select("id, tournament_id, team1_id, team2_id, status, result_text, winner_team_id, summary, stage, created_at, tournaments(name, short_name)")
-      .in("status", ["live", "done"]).order("created_at", { ascending: false }).limit(12);
+    const cols = "id, tournament_id, team1_id, team2_id, status, result_text, winner_team_id, summary, stage, created_at, tournaments(name, short_name)";
+    const q = (c) => sb.from("matches").select(c).in("status", ["live", "done"]).order("created_at", { ascending: false }).limit(12);
+    // The live score column comes with migration 0014; without it the feed still loads.
+    let { data, error } = await q(L.noLive ? cols : cols + ", live");
+    if (error && /live/.test(error.message || "")) { L.noLive = true; ({ data, error } = await q(cols)); }
     if (error) return;
     const ids = [...new Set([].concat(...data.map((m) => [m.team1_id, m.team2_id])))];
     const teams = ids.length ? (await sb.from("teams").select("id, name, short_name, logo_path, primary_color, secondary_color").in("id", ids)).data || [] : [];
@@ -133,16 +136,22 @@
     rerender("home");
   }
   loadFeed();
-  setInterval(() => { if (onScreen("home") && document.visibilityState === "visible") loadFeed(); }, 30 * 1000);
+  setInterval(() => { if (onScreen("home") && document.visibilityState === "visible") loadFeed(); }, 20 * 1000);
 
   function feedHtml() {
     if (!L.feed || !L.feed.length) return "";
-    const score = (m, i) => { const inn = m.summary && m.summary.innings && m.summary.innings.find((x) => x.team === i); return inn ? `${inn.runs}/${inn.wickets}` : ""; };
+    // A live match shows its live score (runs-wickets and overs); a finished one its summary.
+    const score = (m, i) => {
+      const lv = m.live && m.live.inn && m.live.inn.find((x) => x.team === i);
+      if (lv && (m.status === "live" || !m.summary)) return `${lv.r}/${lv.w}${m.status === "live" ? ` <small>(${E.oversText(lv.b, m.live.bpo || 6)})</small>` : ""}`;
+      const inn = m.summary && m.summary.innings && m.summary.innings.find((x) => x.team === i);
+      return inn ? `${inn.runs}/${inn.wickets}` : "";
+    };
     const rows = L.feed.slice(0, 8).map((m) => `<li><button class="feed-row" data-act="feed-open" data-id="${m.id}" data-t="${m.tournament_id}">
         <span class="feed-top"><small>${esc((m.tournaments && (m.tournaments.short_name || m.tournaments.name)) || "")}</small>${m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : ""}</span>
         <span class="feed-team ${m.winner_team_id && m.winner_team_id === m.team1_id ? "won" : ""}">${badge(m.a)}<b>${esc(m.a.short_name)}</b><span>${score(m, 0)}</span></span>
         <span class="feed-team ${m.winner_team_id && m.winner_team_id === m.team2_id ? "won" : ""}">${badge(m.b)}<b>${esc(m.b.short_name)}</b><span>${score(m, 1)}</span></span>
-        <small class="feed-result">${esc(m.status === "live" ? "In progress" : m.result_text || "")}</small></button></li>`).join("");
+        <small class="feed-result">${esc(m.status === "live" ? (m.live && m.live.line) || "In progress" : m.result_text || "")}</small></button></li>`).join("");
     return `<div class="stack-s"><h2 class="eyebrow">Live and recent</h2><ul class="feed">${rows}</ul></div>`;
   }
 
@@ -447,7 +456,7 @@
     }
     const edit = isOrganiser() ? `<button class="icon-btn" data-act="t-edit" aria-label="Edit tournament">${EDIT_ICON}</button>` : "";
     const share = `<button class="icon-btn" data-act="share" data-kind="t" data-id="${t.id}" data-title="${esc(t.name)}" aria-label="Share">${SHARE_ICON}</button>`;
-    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${edit}${share}</header>`
+    return `<header class="bar"><button class="icon-btn" data-act="home" aria-label="Back">←</button><h1>${esc(t.short_name || t.name)}</h1>${edit}${ui.followBtn ? ui.followBtn("tournament", t.id) : ""}${share}</header>`
       + hero + `<section class="wrap stack">${tabs}${body}</section>`;
   };
 
@@ -839,7 +848,7 @@
     if (!rec.match.cloud) return "";
     const t = rec.match.teams;
     const share = `<button class="icon-btn" data-act="share" data-kind="m" data-id="${rec.match.cloud.matchId}" data-title="${esc(`${t[0].name} v ${t[1].name}`)}" aria-label="Share live score">${SHARE_ICON}</button>`;
-    if (rec.readOnly) return `<span class="sync sync-saved">${rec.cloudStatus === "done" ? "Final" : "Live"}</span>${share}`;
+    if (rec.readOnly) return `${ui.followBtn ? ui.followBtn("match", rec.match.cloud.matchId) : ""}${share}`;
     const state = L.badge[rec.match.id] || (pending(rec) ? "saving" : "saved");
     return `<span class="sync sync-${state}" id="sync-badge">${BADGES[state]}</span>${share}`;
   };
@@ -901,6 +910,7 @@
         if (m && !error) m.summary = summary;
       }
       if (CSA.alerts) CSA.alerts.afterSync(rec, s);
+      if (CSA.live) CSA.live.afterSync(rec, s);
       rec.synced = ev.map((e) => JSON.stringify(e));
       const cur = S.get(rec.match.id);
       if (cur) { cur.synced = rec.synced; cur.cloudStatus = rec.cloudStatus; cur.cloudResult = rec.cloudResult; S.save(cur); }
@@ -917,30 +927,25 @@
   }
   window.addEventListener("online", syncPending);
 
-  // A fan watching a live match gets new balls every 15 seconds while the screen is open.
+  // A fan watching a live match checks for new balls every 10 seconds while the screen is open
+  // (live.js only downloads the balls when the match's live score has changed).
   async function refreshWatched(quiet) {
     const rec = ui.current();
     if (!rec || !rec.match.cloud || !rec.readOnly) return;
-    const id = rec.match.cloud.matchId;
-    const [m, events] = await Promise.all([
-      sb.from("matches").select("status").eq("id", id).single(),
-      sb.from("match_events").select("seq, event").eq("match_id", id).order("seq"),
-    ]);
-    if (m.error || events.error) { if (!quiet) ui.toast(errText(m.error || events.error)); return; }
+    let changed;
+    try { changed = await CSA.live.refresh(rec); } catch (e) { if (!quiet) ui.toast(errText(e)); return; }
     if (ui.current() !== rec) return;
-    const changed = events.data.length !== rec.events.length || m.data.status !== rec.cloudStatus;
-    rec.events = events.data.map((r) => r.event);
-    rec.cloudStatus = m.data.status;
     if (changed && onScreen("score", "card")) ui.render();
     else if (!quiet) ui.toast("Up to date");
   }
   setInterval(() => {
     const rec = ui.current();
     if (document.visibilityState === "visible" && rec && rec.readOnly && rec.cloudStatus === "live" && onScreen("score", "card")) refreshWatched(true);
-  }, 15000);
+  }, 10000);
 
   // Opens a shared link once the sign-in state is known (so scorers get the pad, fans the score).
   async function openLink() {
+    if (location.hash === "#/alerts") { history.replaceState(null, "", location.pathname + location.search); return ui.actions.alerts && ui.actions.alerts(); }
     const at = /^#\/@([a-z0-9_]{3,24})$/i.exec(location.hash);
     if (at) {
       history.replaceState(null, "", location.pathname + location.search);
