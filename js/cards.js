@@ -240,9 +240,10 @@
       let x = 60;
       for (const sp of list) {
         if (sp.img) {
-          const k = Math.min(lw / sp.img.width, 48 / sp.img.height);
-          ctx.drawImage(sp.img, x, y + 12 + (48 - sp.img.height * k) / 2, sp.img.width * k, sp.img.height * k);
-          x += sp.img.width * k + 14;
+          const k = Math.min(lw / sp.img.width, 48 / sp.img.height), plate = sp.img.plate && !light;
+          if (plate) x += 8;
+          (plate ? sponsorLogo : (c, im, ...a) => c.drawImage(im, ...a))(ctx, sp.img, x, y + 12 + (48 - sp.img.height * k) / 2, sp.img.width * k, sp.img.height * k);
+          x += sp.img.width * k + 14 + (plate ? 8 : 0);
         }
         if (sp.name && (list.length === 1 || !sp.img)) { ctx.fillStyle = ink; fit(ctx, sp.name.toUpperCase(), Math.max(80, maxX - x), 28, 700, DISPLAY, 14); text(ctx, sp.name.toUpperCase(), x, y + 46); x += ctx.measureText(sp.name.toUpperCase()).width + 14; }
         x += gap - 14;
@@ -963,19 +964,40 @@
         first: words.length > 1 ? words.slice(0, -1).join(" ") : "", last: words[words.length - 1] };
   }
 
+  // A dark logo on a see-through background (dark text, no box) vanishes on the dark cards, so it gets a white plate.
+  function needsPlate(img) {
+    try {
+      const c = canvas(48, 48), x = c.getContext("2d");
+      x.drawImage(img, 0, 0, 48, 48);
+      const px = x.getImageData(0, 0, 48, 48).data;
+      let clear = 0, n = 0, l = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 128) { clear++; continue; }
+        n++; l += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+      }
+      return clear > 48 * 48 * 0.1 && n > 0 && l / n < 0.55;
+    } catch (e) { return false; }
+  }
+  // Draws a sponsor logo in the box (x, y, w, h), on its plate when it has one.
+  function sponsorLogo(ctx, img, x, y, w, h) {
+    if (img.plate) { ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.94)"; roundRect(ctx, x - 8, y - 6, w + 16, h + 12, 8); ctx.fill(); ctx.restore(); }
+    ctx.drawImage(img, x, y, w, h);
+  }
+
   // Sponsor logos in a row, right-aligned at (x, y): used where the foot is taken by the card itself.
   function sponsorRow(ctx, d, x, y, align, dim) {
     const list = d.sponsor && d.sponsor.show === false ? [] : (d.sponsors || []).map((s, i) => ({ name: s.name || "", img: d.images.sponsors[i] })).filter((s) => s.img || s.name);
     if (!list.length) return;
     ctx.fillStyle = dim; font(ctx, 15, 700, BODY);
     const items = list.map((sp) => sp.img ? { img: sp.img, w: Math.min(140 / sp.img.width, 40 / sp.img.height) * sp.img.width } : { name: sp.name.toUpperCase(), w: (font(ctx, 24, 700), ctx.measureText(sp.name.toUpperCase()).width) });
-    const total = items.reduce((a, it) => a + it.w, 0) + 20 * (items.length - 1);
-    let cx = align === "right" ? x - total : x;
-    ctx.fillStyle = dim; font(ctx, 15, 700, BODY); spaced(ctx, list.length > 1 ? "SPONSORS" : "PRESENTED BY", align === "right" ? x : x, y, 3, align === "right" ? "right" : "left");
+    const pad = (it) => (it.img && it.img.plate ? 16 : 0);
+    const total = items.reduce((a, it) => a + it.w + pad(it), 0) + 20 * (items.length - 1);
+    let cx = align === "right" ? x - total : align === "center" ? x - total / 2 : x;
+    ctx.fillStyle = dim; font(ctx, 15, 700, BODY); spaced(ctx, list.length > 1 ? "SPONSORS" : "PRESENTED BY", x, y, 3, align === "right" ? "right" : align === "center" ? "center" : "left");
     for (const it of items) {
-      if (it.img) { const k = it.w / it.img.width; ctx.drawImage(it.img, cx, y + 12 + (40 - it.img.height * k) / 2, it.w, it.img.height * k); }
+      if (it.img) { const k = it.w / it.img.width; sponsorLogo(ctx, it.img, cx + pad(it) / 2, y + 12 + (40 - it.img.height * k) / 2, it.w, it.img.height * k); }
       else { ctx.fillStyle = "#FFFFFF"; font(ctx, 24, 700); text(ctx, it.name, cx, y + 42); }
-      cx += it.w + 20;
+      cx += it.w + pad(it) + 20;
     }
   }
 
@@ -1655,7 +1677,7 @@
     const lu = d.lineup, { P, acc } = xiBackground(ctx, W, H, d), dy = (H - 1350) * 0.3;
     xiTitle(ctx, W, d, acc, false, 70 + dy, P);
     ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, (lu.stage || "").toUpperCase(), W - 120, 22, 600, BODY); spaced(ctx, (lu.stage || "").toUpperCase(), W / 2 + 3, 222 + dy, 6, "center");
-    const gap = 24, cw = (W - 60 - gap) / 2, top = 262 + dy, hh = 170, n = Math.max(1, ...lu.teams.map((t) => t.players.length));
+    const sp = vsSponsors(ctx, d, H), gap = 24, cw = (W - 60 - gap) / 2, top = 262 + dy, hh = 170, n = Math.max(1, ...lu.teams.map((t) => t.players.length));
     lu.teams.forEach((t, k) => {
       const tp = teamPalette(t), X = 30 + k * (cw + gap), sk = 34, cap = d.images.caps && d.images.caps[k];
       slant(ctx, X, top + 40, cw, hh - 40, sk); const g = ctx.createLinearGradient(X, 0, X + cw, 0); g.addColorStop(k ? 1 : 0, tp.base); g.addColorStop(k ? 0 : 1, mix(tp.deep, "#000000", 0.2)); ctx.fillStyle = g; ctx.fill();
@@ -1663,7 +1685,7 @@
       if (cap) { const bx = k ? X + sk / 2 + 80 : X + cw - sk / 2 - 80; ctx.save(); ctx.beginPath(); ctx.rect(X, top - 20, cw, hh + 20); ctx.clip(); bust(ctx, cap, bx, top + hh, 175); ctx.restore(); }
       const ls = 72, cy = top + 40 + (hh - 40) / 2, lx = k ? X + cw - 24 - ls / 2 : X + sk + 4 + ls / 2; logo(ctx, d.images.teams[k], t, lx, cy, ls);
       const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 8; fit(ctx, nm, cw - (cap ? 190 : 60) - ls, 40, 700); text(ctx, nm, k ? lx - ls / 2 - 12 : lx + ls / 2 + 12, cy + 14, k ? "right" : "left"); ctx.shadowBlur = 0;
-      const rs = top + hh + 18, rh = Math.min(H > 1500 ? 110 : 80, (H - 130 - rs) / n);
+      const rs = top + hh + 18, rh = Math.min(H > 1500 ? 110 : 80, (H - 130 - sp - rs) / n);
       t.players.forEach((p, i) => {
         const y = rs + i * rh, tg = xiTags(p);
         if (i % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,0.05)"; roundRect(ctx, X, y, cw, rh - 4, 10); ctx.fill(); }
@@ -1674,7 +1696,7 @@
         const nm2 = p.name.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm2, cw - 90 - tg.length * 60, Math.min(30, rh * 0.44), 600); text(ctx, nm2, k ? X + cw - 70 : X + 70, y + rh * 0.62, k ? "right" : "left");
       });
     });
-    tossPill(ctx, W, H - 104, lu.toss, acc);
+    tossPill(ctx, W, H - 104 - sp, lu.toss, acc);
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
@@ -1706,6 +1728,7 @@
     });
     const vr = 54; ctx.beginPath(); ctx.arc(W / 2, 300 + dy, vr, 0, 7); ctx.fillStyle = "#0B0D12"; ctx.fill(); ctx.strokeStyle = acc; ctx.lineWidth = 5; ctx.stroke(); ctx.fillStyle = acc; font(ctx, 40, 700); text(ctx, "VS", W / 2, 314 + dy, "center");
     if (lu.toss) { const s = lu.toss.toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, s, W - 120, 20, 700, BODY, 12); spaced(ctx, s, W / 2 + 2, H - 30, 2, "center"); }
+    vsSponsors(ctx, d, H, W / 2, "center", H - (lu.toss ? 116 : 86));
     grain(ctx, W, H, 0.05);
   }
 
@@ -1725,7 +1748,7 @@
       const ls = 68; logo(ctx, d.images.teams[k], t, k ? X + w - 20 - ls / 2 : X + 20 + ls / 2, top + hh / 2, ls);
       const nm = (t.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, w - ls - 60, 36, 700); text(ctx, nm, k ? X + w - 36 - ls : X + 36 + ls, top + hh / 2 + 13, k ? "right" : "left");
     });
-    const n = Math.max(1, ...lu.teams.map((t) => t.players.length)), rs = top + hh + 10, rh = Math.min(90, (H - 140 - rs) / n);
+    const n = Math.max(1, ...lu.teams.map((t) => t.players.length)), rs = top + hh + 10, sp = vsSponsors(ctx, d, H), rh = Math.min(90, (H - 140 - sp - rs) / n);
     for (let i = 0; i < n; i++) {
       const y = rs + i * rh;
       ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)"; ctx.fillRect(30, y, W - 60, rh);
@@ -1737,7 +1760,7 @@
       });
     }
     lu.teams.forEach((t, k) => { ctx.fillStyle = teamPalette(t).base; ctx.fillRect(k ? W - 34 : 30, rs, 4, rh * n); });
-    tossPill(ctx, W, H - 112, lu.toss, acc);
+    tossPill(ctx, W, H - 112 - sp, lu.toss, acc);
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
@@ -1784,7 +1807,7 @@
 
   function drawSquadRoster(ctx, W, H, th, d) {
     const T = squadTones(d), ps = squadList(d, H), imgs = d.images.players || []; squadBg(ctx, W, H, T); squadHead(ctx, W, d, T, 40 + (H - 1350) * 0.15);
-    const n = ps.length, cols = n > 12 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 1.5, (H - 50 - y0 - gap * (rows - 1)) / rows);
+    const sp = vsSponsors(ctx, d, H), n = ps.length, cols = n > 12 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 1.5, (H - 50 - sp - y0 - gap * (rows - 1)) / rows);
     ps.forEach((p, i) => {
       const X = 30 + (i % cols) * (tw + gap), Y = y0 + Math.floor(i / cols) * (th2 + gap), img = imgs[i], nh = Math.max(40, th2 * 0.3), no = p.no != null ? String(p.no) : "";
       ctx.save(); roundRect(ctx, X, Y, tw, th2, 14); const g = ctx.createLinearGradient(0, Y, 0, Y + th2); g.addColorStop(0, rgba(T.base, p.cap ? 0.95 : 0.6)); g.addColorStop(1, rgba(mix(T.deep, "#000000", 0.4), 0.95)); ctx.fillStyle = g; ctx.fill(); ctx.clip();
@@ -1797,7 +1820,7 @@
       ctx.fillStyle = T.acc; font(ctx, nh * 0.26, 700, BODY); spaced(ctx, sub, X + tw / 2 + 1, Y + th2 - nh * 0.14, 2, "center");
       if (p.cap || p.wk) pill(ctx, p.cap ? "C" : "WK", X + 8, Y + 22, 28, p.cap ? T.acc : "rgba(0,0,0,0.5)", p.cap ? "#0B0D12" : "#FFFFFF");
     });
-    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22); }
+    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22 - sp); }
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
@@ -1818,7 +1841,7 @@
     ctx.fillStyle = T.acc; fit(ctx, d.tournament.name.toUpperCase(), W - X - 40, 22, 600); spaced(ctx, d.tournament.name.toUpperCase(), X, 76 + dy, 6);
     ctx.fillStyle = "#FFFFFF"; font(ctx, 110, 700); text(ctx, "SQUAD", X, 190 + dy);
     ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, (sq.team.name || "").toUpperCase(), W - X - 40, 40, 700); text(ctx, (sq.team.name || "").toUpperCase(), X, 244 + dy);
-    const rest = sq.players.map((p, i) => [p, imgs[i]]).filter(([p]) => p !== cap).slice(0, H > 1500 ? 29 : 23), rs = 290 + dy, rh = Math.min(H > 1500 ? 90 : 70, (H - 60 - rs) / Math.max(1, rest.length));
+    const rest = sq.players.map((p, i) => [p, imgs[i]]).filter(([p]) => p !== cap).slice(0, H > 1500 ? 29 : 23), rs = 290 + dy, sp = vsSponsors(ctx, d, H, W - 40, "right"), rh = Math.min(H > 1500 ? 90 : 70, (H - 60 - sp - rs) / Math.max(1, rest.length));
     rest.forEach(([p, im], i) => {
       const y = rs + i * rh;
       if (i % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,0.06)"; roundRect(ctx, X - 10, y, W - X - 20, rh - 4, 10); ctx.fill(); }
@@ -1833,7 +1856,7 @@
 
   function drawSquadNumbers(ctx, W, H, th, d) {
     const T = squadTones(d), ps = squadList(d, H), imgs = d.images.players || []; squadBg(ctx, W, H, T); squadHead(ctx, W, d, T, 40 + (H - 1350) * 0.15);
-    const n = ps.length, cols = n > 18 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 0.9, (H - 50 - y0 - gap * (rows - 1)) / rows);
+    const sp = vsSponsors(ctx, d, H), n = ps.length, cols = n > 18 ? 4 : 3, rows = Math.ceil(n / cols), gap = 14, y0 = 240 + (H - 1350) * 0.3, tw = (W - 60 - gap * (cols - 1)) / cols, th2 = Math.min(tw * 0.9, (H - 50 - sp - y0 - gap * (rows - 1)) / rows);
     ps.forEach((p, i) => {
       const X = 30 + (i % cols) * (tw + gap), Y = y0 + Math.floor(i / cols) * (th2 + gap), sk = th2 * 0.18;
       slant(ctx, X, Y, tw, th2, sk); ctx.fillStyle = p.cap ? rgba(T.base, 0.9) : "rgba(255,255,255,0.06)"; ctx.fill();
@@ -1844,7 +1867,7 @@
       const tg = p.cap ? "CAPTAIN" : [p.wk ? "WK" : "", SQ_ROLE[p.role] && p.role !== "keeper" ? SQ_ROLE[p.role] : ""].filter(Boolean).join(" · ");
       ctx.fillStyle = p.cap ? "#FFFFFF" : T.acc; font(ctx, th2 * 0.11, 700, BODY); spaced(ctx, tg, X + 8, Y + th2 * 0.92, 3);
     });
-    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22); }
+    if (d.squad.players.length > n) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 22, 600, BODY); text(ctx, `+ ${d.squad.players.length - n} more`, 40, H - 22 - sp); }
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
@@ -1863,7 +1886,8 @@
     ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillText("VS", s * 0.04, s * 0.06);
     const g = ctx.createLinearGradient(-s * 0.6, -s * 0.8, s * 0.6, 0); g.addColorStop(0, "#FFFFFF"); g.addColorStop(0.55, mix("#FFFFFF", acc, 0.3)); g.addColorStop(1, acc); ctx.fillStyle = g; ctx.fillText("VS", 0, 0); ctx.restore();
   }
-  function vsSponsors(ctx, d, H) { const on = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false); if (on) sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)"); return on ? 70 : 0; }
+  // Sponsors along the foot (bottom left unless told otherwise); returns the height to keep clear for them.
+  function vsSponsors(ctx, d, H, x, align, y) { const on = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false); if (on) sponsorRow(ctx, d, x == null ? 50 : x, y == null ? H - 86 : y, align || "left", "rgba(255,255,255,0.6)"); return on ? 70 : 0; }
 
   // Each half of the card in its team's colours, the captains standing large, VS on the seam.
   function drawVsClash(ctx, W, H, th, d) {
@@ -1883,7 +1907,7 @@
     vsTitle(ctx, W, d, 66 + dy * 0.6, acc, P);
     if (caps.some(Boolean)) v.teams.forEach((t, k) => logo(ctx, d.images.teams[k], t, k ? W - 105 : 105, 330 + dy * 0.8, 130));
     vsMark(ctx, W / 2, H * 0.5 + 60 + dy * 0.2, 230, acc, P);
-    const sp = vsSponsors(ctx, d, H), bt = H - 430 - sp;
+    const sp = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false) ? 70 : 0, bt = H - 430 - sp;
     const bot = ctx.createLinearGradient(0, bt, 0, H); bot.addColorStop(0, "rgba(0,0,0,0)"); bot.addColorStop(0.45, "rgba(0,0,0,0.6)"); bot.addColorStop(1, "rgba(0,0,0,0.85)"); ctx.fillStyle = bot; ctx.fillRect(0, bt, W, H - bt);
     v.teams.forEach((t, k) => {
       const nm = (t.name || "").toUpperCase(), X = k ? W - 50 : 50; ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 10;
@@ -1895,7 +1919,7 @@
     ctx.fillStyle = acc; slant(ctx, W / 2 - lw / 2, H - 160 - sp, lw, 62, 14); ctx.fill();
     ctx.fillStyle = lum(acc) > 0.3 ? "#0B0D12" : "#FFFFFF"; fit(ctx, line, lw - 60, 34, 700); text(ctx, line, W / 2, H - 117 - sp, "center");
     const sub = [v.venue, v.rules].filter(Boolean).join("  ·  "); ctx.fillStyle = "rgba(255,255,255,0.8)"; fit(ctx, sub, W - 160, 24, 600, BODY); text(ctx, sub, W / 2, H - 62 - sp, "center");
-    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+    vsSponsors(ctx, d, H); appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
   // Two tall team-colour frames with the captains inside, on the tournament background.
@@ -1903,7 +1927,7 @@
     const v = d.versus, { P, acc, BG } = xiBackground(ctx, W, H, d), dy = (H - 1350) * 0.5, caps = d.images.caps || [];
     v.teams.forEach((t, k) => { const T = teamTones(t, d), g = ctx.createRadialGradient(k ? W : 0, H * 0.5, 40, k ? W : 0, H * 0.5, 700); g.addColorStop(0, rgba(T.base, 0.4)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); });
     vsTitle(ctx, W, d, 66 + dy * 0.5, acc, P);
-    const sp = vsSponsors(ctx, d, H), pw = (W - 60 - 90) / 2, y0 = 270 + dy * 0.8, ph = Math.min(H > 1500 ? 900 : 640, H - y0 - 330 - sp), sk = 70;
+    const sp = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false) ? 70 : 0, pw = (W - 60 - 90) / 2, y0 = 270 + dy * 0.8, ph = Math.min(H > 1500 ? 900 : 640, H - y0 - 330 - sp), sk = 70;
     v.teams.forEach((t, k) => {
       const T = teamTones(t, d), X = k ? W - 30 - pw : 30;
       ctx.save(); slant(ctx, X, y0, pw, ph, sk); const g = ctx.createLinearGradient(0, y0, 0, y0 + ph); g.addColorStop(0, T.base); g.addColorStop(1, mix(T.deep, "#000000", 0.3)); ctx.fillStyle = g; ctx.shadowColor = rgba(T.base, 0.6); ctx.shadowBlur = 40; ctx.fill(); ctx.restore();
@@ -1924,13 +1948,13 @@
     ctx.fillStyle = "#FFFFFF"; const big = [day, time].filter(Boolean).join("  ·  ").toUpperCase(); fit(ctx, big, W - 120, 58, 700); text(ctx, big, W / 2, iy + 58, "center");
     if (v.venue) { ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, v.venue, W - 160, 28, 600, BODY); text(ctx, v.venue, W / 2, iy + 108, "center"); }
     if (v.rules) tossPill(ctx, W, iy + 136, v.rules, acc);
-    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+    vsSponsors(ctx, d, H); appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
   // One team above the other, split by a band with the date and VS.
   function drawVsStack(ctx, W, H, th, d) {
     const v = d.versus, dy = (H - 1350) * 0.5, { P, acc, BG } = xiBackground(ctx, W, H, d), caps = d.images.caps || [];
-    const sp = vsSponsors(ctx, d, H), h0 = 250 + dy * 0.6, h1 = H - 150 - sp, mid = (h0 + h1) / 2, bh = 116;
+    const sp = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false) ? 70 : 0, h0 = 250 + dy * 0.6, h1 = H - 150 - sp, mid = (h0 + h1) / 2, bh = 116;
     v.teams.forEach((t, k) => {
       const T = teamTones(t, d), y = k ? mid : h0, hh = k ? h1 - mid : mid - h0, px = k ? W * 0.28 : W * 0.72;
       ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, hh); ctx.clip();
@@ -1959,7 +1983,7 @@
     vsTitle(ctx, W, d, 62 + dy * 0.4, acc, P);
     ctx.fillStyle = BG; ctx.fillRect(0, h1, W, H - h1);
     const sub = [v.venue, v.rules].filter(Boolean).join("  ·  "); ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, sub.toUpperCase(), W - 140, 26, 600, BODY); spaced(ctx, sub.toUpperCase(), W / 2 + 2, h1 + 64, 3, "center");
-    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+    vsSponsors(ctx, d, H); appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
   // ---------- Points table: Ladder, Glass and Leader ----------
@@ -2551,6 +2575,7 @@
     // Sponsors: d.sponsors [{name, url}], or the older single d.sponsor with urls.sponsor.
     if (!d.sponsors) d.sponsors = d.sponsor && (u.sponsor || d.sponsor.name) ? [{ name: d.sponsor.name || "", url: u.sponsor || "" }] : [];
     const [tournament, playerImg, sponsors, teams, caps, players] = await Promise.all([loadImg(u.tournament), loadImg(u.player), Promise.all(d.sponsors.map((s) => loadImg(s.url))), Promise.all((u.teams || []).map(loadImg)), Promise.all((u.caps || []).map(loadImg)), Promise.all((u.players || []).map(loadImg))]);
+    for (const im of sponsors) if (im && im.plate == null) im.plate = needsPlate(im);
     d.images = { tournament, player: playerImg, sponsors, teams, caps, players };
     const cv = canvas(W, H), ctx = cv.getContext("2d");
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);

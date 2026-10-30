@@ -15,12 +15,12 @@
   const initialsOf = (name) => String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 
   function tournamentInfo(t) {
-    if (!t) return { id: "", info: { name: "Friendly match", short: "", initials: "CS", c1: "#0F7A45", c2: "#0E1A14" }, logo: "", sponsor: { show: false } };
+    if (!t) return { id: "", info: { name: "Friendly match", short: "", initials: "CS", c1: "#0F7A45", c2: "#0E1A14" }, logo: "", sponsors: [] };
     return {
       id: t.id,
       info: { name: t.name, short: t.short_name || "", initials: t.short_name || initialsOf(t.name), c1: t.primary_color, c2: t.secondary_color },
       logo: url("logos", t.logo_path),
-      sponsor: { show: t.show_sponsor !== false, name: t.sponsor_name || "" , logo: url("logos", t.sponsor_logo_path) },
+      sponsors: (lg ? lg.sponsorsOf(t) : []).map((sp) => ({ name: sp.name || "", logo: url("logos", sp.logo_path) })),
     };
   }
 
@@ -47,9 +47,9 @@
   function savedSponsors(tid) { try { return JSON.parse(localStorage.getItem(sponsorKey(tid)) || "[]"); } catch (e) { return []; } }
   function saveSponsors(tid, list) { try { localStorage.setItem(sponsorKey(tid), JSON.stringify(list)); return true; } catch (e) { return false; } }
 
-  // The tournament's own sponsor (from its settings, when shown and set) and then this device's.
+  // The tournament's own sponsors (from its settings) and then this device's.
   function sponsorsFor(ti) {
-    const sp = ti.sponsor, own = sp.show && (sp.logo || sp.name) ? [{ name: sp.name || "", url: sp.logo || "", from: "tour" }] : [];
+    const own = (ti.sponsors || []).filter((sp) => sp.logo || sp.name).map((sp) => ({ name: sp.name, url: sp.logo, from: "tour" }));
     return own.concat(savedSponsors(ti.id).map((x) => ({ name: "", url: x.url, from: "device", id: x.id })));
   }
 
@@ -629,7 +629,7 @@
     const head = tour ? { name: tour.name, short: tour.short_name || "", initials: tour.short_name || initialsOf(tour.name), c1: tour.primary_color, c2: tour.secondary_color, logo: url("logos", tour.logo_path) }
       : team ? { name: team.name, short: team.short_name || "", initials: team.short_name || initialsOf(team.name), c1: team.primary_color, c2: team.secondary_color, logo: url("logos", team.logo_path) }
       : { name: ui.APP, short: "", initials: "CP", c1: "#0F7A45", c2: "#0E1A14", logo: "" };
-    const ti = { id: tour ? C.pick : "player", info: head, logo: head.logo, sponsor: { show: false } };
+    const ti = { id: tour ? C.pick : "player", info: head, logo: head.logo, sponsors: [] };
     const d = base({ ti }, {
       career: {
         scope, role, formTitle: `Last ${inns.length} innings`, formMax: bowler ? 3 : 50, form, stats, formStats,
@@ -687,7 +687,7 @@
     const item = (sp, i) => `<span class="chip sponsor-chip">${sp.url ? `<img src="${esc(sp.url)}" alt="">` : ""}${esc(sp.name || (sp.from === "tour" ? "Tournament sponsor" : `Sponsor ${i + 1}`))}
       <button class="chip-x" data-act="card-sponsor-remove" data-i="${i}" aria-label="Remove sponsor">✕</button></span>`;
     return `<div class="card stack-s"><span class="eyebrow">Sponsors</span>
-      <p class="muted small">${list.length ? "Shown along the bottom of the card." : "No sponsors, so the card has no sponsor section."} Logos added here stay on this phone for this tournament's cards.</p>
+      <p class="muted small">${list.length ? "Shown along the bottom of the card." : "No sponsors, so the card has no sponsor section."} The tournament's sponsors are set in its settings and go on every card. Logos added here stay on this phone.</p>
       <div class="chips">${list.map(item).join("")}${list.length < 4 ? `<label class="chip file-btn">+ Add sponsor logo<input type="file" accept="image/*" data-card-sponsor="1" hidden></label>` : ""}</div></div>`;
   }
 
