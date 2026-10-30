@@ -753,6 +753,7 @@
     rec.events = events.data.map((r) => r.event);
     rec.synced = rec.events.map((e) => JSON.stringify(e));
     rec.cloudStatus = m.status;
+    rec.cloudResult = m.result_text || null;
     // After handing the match over, this phone only watches until the user takes it back.
     const before = S.get(m.id);
     rec.handedOver = !!(before && before.handedOver);
@@ -879,11 +880,14 @@
       }
       const s = E.replay(rec.match, ev), status = s.result ? "done" : "live";
       const statusChanged = status !== rec.cloudStatus;
-      if (statusChanged) {
-        const upd = { status, result_text: s.result ? s.result.text : null, winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null };
+      const resultText = s.result ? s.result.text : null;
+      // A ball fixed after the match ended can change the margin or even the winner, so the
+      // result is sent again whenever it differs from the one the server has.
+      if (statusChanged || (s.result && resultText !== rec.cloudResult)) {
+        const upd = { status, result_text: resultText, winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null };
         const { error } = await sb.from("matches").update(upd).eq("id", id);
         if (error) throw error;
-        rec.cloudStatus = status;
+        rec.cloudStatus = status; rec.cloudResult = resultText;
         const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
         if (m) Object.assign(m, upd);
       }
@@ -899,7 +903,7 @@
       if (CSA.alerts) CSA.alerts.afterSync(rec, s);
       rec.synced = ev.map((e) => JSON.stringify(e));
       const cur = S.get(rec.match.id);
-      if (cur) { cur.synced = rec.synced; cur.cloudStatus = rec.cloudStatus; S.save(cur); }
+      if (cur) { cur.synced = rec.synced; cur.cloudStatus = rec.cloudStatus; cur.cloudResult = rec.cloudResult; S.save(cur); }
       syncRec.busy = false;
       if (pending(rec)) ui.changed(rec); else setBadge(rec, "saved");
     } catch (e) {
