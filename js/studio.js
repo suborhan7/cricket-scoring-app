@@ -593,6 +593,55 @@
     if (card) show(card, "tour"); else openList("Cards", matchCards(rec), "tour");
   }
 
+  // ---------- Player card ----------
+
+  // A player's career (or one tournament of it) as a card. C is the profile's loaded career:
+  // { matches, teams: Map of id -> team, pick: "all" or a tournament id }.
+  async function careerCard(id, C) {
+    const [pr, tp] = await Promise.all([
+      sb.from("players").select("full_name, role, jersey_no, photo_path").eq("id", id).single(),
+      sb.from("team_players").select("teams(id, name, short_name, logo_path, primary_color, secondary_color, captain_player_id)").eq("player_id", id),
+    ]);
+    if (pr.error) { ui.toast(lg.errText(pr.error)); return null; }
+    const p = pr.data, ms = C.pick === "all" ? C.matches : C.matches.filter((m) => m.tournament_id === C.pick);
+    const c = St.career(ms, id);
+    // Their team: the one they played their latest match for, else their first squad.
+    const latest = c.innings[0], teams = (tp.data || []).map((r) => r.teams).filter(Boolean);
+    const team = (latest && teams.find((t) => t.id === latest.teamId)) || teams[0] || (latest && C.teams.get(latest.teamId)) || null;
+    const T = ms[0] && ms[0].tournaments, tour = C.pick !== "all" && T;
+    const n = (v, dp) => (v == null ? "–" : v.toFixed(dp));
+    const role = CSA.squad && CSA.squad.ROLE_NAME[p.role] || "";
+    const bowler = p.role === "bowler" || (p.role !== "batter" && p.role !== "allrounder" && c.bowl.wickets * 20 > c.bat.runs);
+    const b = c.bat, w = c.bowl, hs = `${b.best}${b.bestOut ? "" : "*"}`, best = `${w.bestW}/${w.bestR}`;
+    const stats = bowler ? [[c.matches, "Matches"], [best, "Best"], [n(w.econ, 2), "Economy"], [n(w.avg, 1), "Average"], [w.threes, "3-fors"], [w.fives, "5-fors"]]
+      : p.role === "allrounder" && w.wickets ? [[c.matches, "Matches"], [hs, "Highest"], [n(b.sr, 1), "Strike rate"], [w.wickets, "Wickets"], [best, "Best bowling"], [n(w.econ, 2), "Economy"]]
+      : [[c.matches, "Matches"], [hs, "Highest"], [n(b.avg, 1), "Average"], [n(b.sr, 1), "Strike rate"], [b.fifties, "Fifties"], b.hundreds ? [b.hundreds, "Hundreds"] : [b.sixes, "Sixes"]];
+    const shortOf = (tid) => { const t = C.teams.get(tid); return t ? t.short_name || t.name.slice(0, 3).toUpperCase() : ""; };
+    const inns = c.innings.filter((i) => (bowler ? i.bowl : i.bat)).slice(0, 10).reverse();
+    const form = inns.map((i) => bowler
+      ? { v: i.bowl.wickets, label: `${i.bowl.wickets}/${i.bowl.runs}`, vs: shortOf(i.vsId), tone: i.bowl.wickets >= 3 ? "hot" : i.bowl.wickets ? "good" : "low" }
+      : { v: i.bat.runs, label: `${i.bat.runs}${i.bat.out ? "" : "*"}`, vs: shortOf(i.vsId), tone: i.bat.runs >= 50 ? "hot" : i.bat.out && !i.bat.runs ? "duck" : i.bat.runs >= 30 ? "good" : "low" });
+    // The same numbers over just the innings on the chart.
+    const f = St.career(ms.filter((m) => inns.some((i) => i.matchId === m.id)), id);
+    const formStats = bowler ? [[f.bowl.wickets, "Wickets"], [`${f.bowl.bestW}/${f.bowl.bestR}`, "Best"], [n(f.bowl.econ, 2), "Economy"], [n(f.bowl.avg, 1), "Average"]]
+      : [[f.bat.runs, "Runs"], [n(f.bat.avg, 1), "Average"], [n(f.bat.sr, 1), "Strike rate"], [`${f.bat.best}${f.bat.bestOut ? "" : "*"}`, "Best"]];
+    const scope = `${tour ? "Tournament stats" : "Career"} · ${c.matches} match${c.matches === 1 ? "" : "es"}`;
+    const head = tour ? { name: tour.name, short: tour.short_name || "", initials: tour.short_name || initialsOf(tour.name), c1: tour.primary_color, c2: tour.secondary_color, logo: url("logos", tour.logo_path) }
+      : team ? { name: team.name, short: team.short_name || "", initials: team.short_name || initialsOf(team.name), c1: team.primary_color, c2: team.secondary_color, logo: url("logos", team.logo_path) }
+      : { name: ui.APP, short: "", initials: "CP", c1: "#0F7A45", c2: "#0E1A14", logo: "" };
+    const ti = { id: tour ? C.pick : "player", info: head, logo: head.logo, sponsor: { show: false } };
+    const d = base({ ti }, {
+      career: {
+        scope, role, formTitle: `Last ${inns.length} innings`, formMax: bowler ? 3 : 50, form, stats, formStats,
+        headline: bowler ? [w.wickets, tour ? "Wickets" : "Career wickets"] : [b.runs.toLocaleString("en"), tour ? "Runs" : "Career runs"],
+        formText: inns.length ? `Last ${inns.length}: ${form.map((x) => x.label).join(", ")}` : "",
+      },
+    });
+    d.player = { name: p.full_name, initials: initialsOf(p.full_name), team: team ? team.name : "", teamShort: team ? team.short_name : "", c1: team && team.primary_color, c2: team && team.secondary_color, no: p.jersey_no };
+    d.urls.player = p.photo_path ? url("photos", p.photo_path) : "";
+    return { kind: "career", data: d, title: `Player card: ${p.full_name}` };
+  }
+
   // ---------- Preview and share ----------
 
   async function show(card, back) {
@@ -617,7 +666,7 @@
   }
 
   // Cards with a player photo: upload another one for this card, or go back to the profile photo.
-  const HAS_PHOTO = new Set(["milestone", "potm", "award", "leaders", "champions"]);
+  const HAS_PHOTO = new Set(["milestone", "potm", "award", "leaders", "champions", "career"]);
   function photoBox(c) {
     if (!HAS_PHOTO.has(c.kind)) return "";
     const custom = c.profilePhoto !== undefined;
@@ -713,7 +762,8 @@
     "cardview-back"() {
       V.card.caption = currentCaption();
       const b = V.card.back;
-      if (b === "cards") ui.go("cards");
+      if (typeof b === "function") b();
+      else if (b === "cards") ui.go("cards");
       else if (b === "tour" && L.tour) lg.openTour(L.tour.id, "cards");
       else if (b === "score" && ui.current()) ui.actions["back-score"]();
       else ui.actions.home();
@@ -767,5 +817,5 @@
   const prevExtra = ui.cardExtra;
   ui.cardExtra = (rec) => `<button class="btn btn-primary" data-act="cards-match">Cards for this match</button>` + prevExtra(rec);
 
-  CSA.studio = { tab, show, matchCards, openAlert };
+  CSA.studio = { tab, show, matchCards, openAlert, careerCard };
 })();

@@ -170,7 +170,62 @@
       .sort((a, b) => b.pts - a.pts || b.runs - a.runs || b.wickets - a.wickets);
   }
 
-  const api = { summarize, pointsTable, leaders, mvp, tournamentMvp, MVP_RULES };
+  // One player's career from the summaries of the finished matches they played: totals,
+  // a row per tournament, and every innings newest first (for the form chart).
+  // Matches carry tournament_id, team ids, starts_at or created_at, winner_team_id and summary.
+  function career(matches, id) {
+    const blankBat = () => ({ inns: 0, runs: 0, balls: 0, outs: 0, fours: 0, sixes: 0, best: 0, bestOut: true, thirties: 0, fifties: 0, hundreds: 0, ducks: 0 });
+    const blankBowl = () => ({ inns: 0, balls: 0, runs: 0, wickets: 0, bestW: -1, bestR: 0, threes: 0, fives: 0, bpo: 6 });
+    const addBat = (x, b) => {
+      x.inns++; x.runs += b.runs; x.balls += b.balls; x.fours += b.fours; x.sixes += b.sixes;
+      if (b.out) x.outs++;
+      if (b.out && b.runs === 0) x.ducks++;
+      if (b.runs > x.best || (b.runs === x.best && !b.out)) { x.best = b.runs; x.bestOut = b.out; }
+      if (b.runs >= 100) x.hundreds++; else if (b.runs >= 50) x.fifties++; else if (b.runs >= 30) x.thirties++;
+    };
+    const addBowl = (x, b, bpo) => {
+      x.inns++; x.balls += b.balls; x.runs += b.runs; x.wickets += b.wickets; x.bpo = bpo;
+      if (b.wickets > x.bestW || (b.wickets === x.bestW && b.runs < x.bestR)) { x.bestW = b.wickets; x.bestR = b.runs; }
+      if (b.wickets >= 5) x.fives++; else if (b.wickets >= 3) x.threes++;
+    };
+    const finish = (bat, bowl) => {
+      bat.notOuts = bat.inns - bat.outs;
+      bat.avg = bat.outs ? bat.runs / bat.outs : null;
+      bat.sr = bat.balls ? (bat.runs * 100) / bat.balls : null;
+      bowl.overs = E.oversText(bowl.balls, bowl.bpo);
+      bowl.econ = bowl.balls ? (bowl.runs * bowl.bpo) / bowl.balls : null;
+      bowl.avg = bowl.wickets ? bowl.runs / bowl.wickets : null;
+      bowl.sr = bowl.wickets ? bowl.balls / bowl.wickets : null;
+      if (bowl.bestW < 0) { bowl.bestW = 0; bowl.bestR = 0; }
+    };
+    const when = (m) => m.starts_at || m.created_at || "";
+    const done = matches.filter((m) => m.status === "done" && m.summary).slice().sort((a, b) => (when(b) > when(a) ? 1 : when(b) < when(a) ? -1 : 0));
+    const all = { matches: 0, wins: 0, bat: blankBat(), bowl: blankBowl() }, tours = new Map(), innings = [];
+    for (const m of done) {
+      const sm = m.summary, teamIds = [m.team1_id, m.team2_id], bpo = sm.bpo || 6;
+      const bt = sm.bat.find((x) => x.id === id), bw = sm.bowl.find((x) => x.id === id);
+      const team = bt ? bt.team : bw ? bw.team : null;
+      if (team == null) continue;
+      const tid = m.tournament_id || "", t = m.tournaments || {};
+      if (!tours.has(tid)) tours.set(tid, { id: tid, name: t.name || "Matches", short: t.short_name || "", matches: 0, wins: 0, bat: blankBat(), bowl: blankBowl() });
+      const T = tours.get(tid), won = !!m.winner_team_id && m.winner_team_id === teamIds[team];
+      for (const x of [all, T]) { x.matches++; if (won) x.wins++; }
+      const batted = !!(bt && (bt.balls || bt.out)), bowled = !!(bw && bw.balls);
+      if (batted) { addBat(all.bat, bt); addBat(T.bat, bt); }
+      if (bowled) { addBowl(all.bowl, bw, bpo); addBowl(T.bowl, bw, bpo); }
+      innings.push({
+        matchId: m.id, tournamentId: tid, date: when(m), teamId: teamIds[team], vsId: teamIds[1 - team], won,
+        tie: !m.winner_team_id,
+        bat: batted ? { runs: bt.runs, balls: bt.balls, out: bt.out, fours: bt.fours, sixes: bt.sixes } : null,
+        bowl: bowled ? { wickets: bw.wickets, runs: bw.runs, balls: bw.balls, overs: E.oversText(bw.balls, bpo) } : null,
+      });
+    }
+    finish(all.bat, all.bowl);
+    for (const T of tours.values()) finish(T.bat, T.bowl);
+    return Object.assign(all, { tours: [...tours.values()], innings });
+  }
+
+  const api = { summarize, pointsTable, leaders, mvp, tournamentMvp, career, MVP_RULES };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.CSA = Object.assign(root.CSA || {}, { stats: api });
 })(typeof window !== "undefined" ? window : globalThis);

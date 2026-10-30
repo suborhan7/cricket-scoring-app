@@ -213,15 +213,45 @@
 
   // ---------- Profile ----------
 
-  // A player's finished matches, loaded once per player; the numbers are worked out per
-  // tournament filter from these.
+  // A player's finished matches, loaded once per player, with the names of the teams they
+  // played against; the numbers are worked out per tournament filter from these.
   const careers = {};
   async function loadCareer(id) {
-    careers[id] = { loading: true, pick: "all" };
-    const { data, error } = await sb.from("matches").select("id, tournament_id, team1_id, team2_id, status, summary, winner_team_id, tournaments(id, name, short_name)")
+    careers[id] = { loading: true, pick: "all", view: "bat" };
+    const { data, error } = await sb.from("matches").select("id, tournament_id, team1_id, team2_id, status, summary, winner_team_id, starts_at, created_at, tournaments(id, name, short_name, logo_path, primary_color, secondary_color)")
       .eq("status", "done").contains("lineups", { teams: [{ players: [id] }] }).limit(500);
-    careers[id] = { error: error ? errText(error) : "", matches: data || [], pick: "all" };
+    const ids = [...new Set((data || []).flatMap((m) => [m.team1_id, m.team2_id]))];
+    const teams = ids.length ? await sb.from("teams").select("id, name, short_name").in("id", ids) : { data: [] };
+    const C = { error: error ? errText(error) : "", matches: data || [], teams: new Map((teams.data || []).map((t) => [t.id, t])), pick: "all", view: "bat" };
+    // A bowler opens on their bowling.
+    const c = CSA.stats.career(C.matches, id);
+    if (c.bowl.wickets * 20 > c.bat.runs) C.view = "bowl";
+    careers[id] = C;
     lg.rerender("profile", "player");
+  }
+
+  const one = (n, d) => (n == null ? "–" : n.toFixed(d));
+  const shortOf = (C, id) => { const t = C.teams.get(id); return t ? t.short_name || t.name.slice(0, 3).toUpperCase() : "?"; };
+  const dateOf = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "");
+
+  // The last innings as bars, oldest on the left: runs (a fifty in the accent colour, a duck in red)
+  // or wickets (three or more in the accent colour).
+  function formChart(C, c, view) {
+    const inns = c.innings.filter((i) => i[view]).slice(0, 10).reverse();
+    if (!inns.length) return `<p class="muted small">No ${view === "bat" ? "innings" : "bowling"} yet.</p>`;
+    const val = (i) => (view === "bat" ? i.bat.runs : i.bowl.wickets);
+    const max = Math.max(view === "bat" ? 50 : 3, ...inns.map(val));
+    const bars = inns.map((i) => {
+      const v = val(i), b = i.bat, w = i.bowl;
+      const tone = view === "bat" ? (v >= 50 ? "hot" : b.out && v === 0 ? "duck" : v >= 30 ? "good" : "") : v >= 3 ? "hot" : v ? "good" : "";
+      const label = view === "bat" ? `${v}${b.out ? "" : "*"}` : `${w.wickets}/${w.runs}`;
+      return `<div class="fbar ${tone}" title="${esc(label)} v ${esc(shortOf(C, i.vsId))}"><b>${label}</b><i style="height:${Math.max(4, Math.round((v / max) * 100))}%"></i><span>${esc(shortOf(C, i.vsId))}</span></div>`;
+    }).join("");
+    return `<div class="form-chart" role="img" aria-label="Last ${inns.length} innings">${bars}</div>`;
+  }
+
+  function statGrid(rows) {
+    return `<div class="facts stat-grid">${rows.map(([k, v]) => `<div class="fact"><span>${k}</span><b>${v}</b></div>`).join("")}</div>`;
   }
 
   function careerHtml(id) {
@@ -229,20 +259,34 @@
     if (!C) { loadCareer(id); return `<p class="muted">Loading stats…</p>`; }
     if (C.loading) return `<p class="muted">Loading stats…</p>`;
     if (C.error) return `<p class="error">${esc(C.error)}</p>`;
-    const tours = new Map();
-    for (const m of C.matches) if (m.tournaments) tours.set(m.tournament_id, m.tournaments);
+    const all = CSA.stats.career(C.matches, id);
+    if (!all.matches) return `<h2 class="eyebrow">Career</h2><p class="muted small">The numbers, form chart and player card fill in after the first finished match.</p>`;
     const ms = C.pick === "all" ? C.matches : C.matches.filter((m) => m.tournament_id === C.pick);
-    const all = CSA.stats.leaders(ms), b = all.runs.find((x) => x.id === id), w = all.wickets.find((x) => x.id === id);
+    const c = CSA.stats.career(ms, id), b = c.bat, w = c.bowl;
     const tile = (n, label) => `<div class="tile"><b>${n}</b><span>${label}</span></div>`;
-    const chip = (v, l) => `<button class="chip ${C.pick === v ? "on" : ""}" data-act="career-pick" data-p="${id}" data-v="${v}">${esc(l)}</button>`;
-    const chips = tours.size > 1 || (tours.size === 1 && C.pick !== "all")
-      ? `<div class="chips chips-scroll">${chip("all", "All matches")}${[...tours.entries()].map(([k, t]) => chip(k, t.short_name || t.name)).join("")}</div>` : "";
-    const title = C.pick === "all" ? "Career" : esc((tours.get(C.pick) || {}).name || "Tournament");
-    return `<h2 class="eyebrow">${title}</h2>${chips}
-      <div class="tiles">${tile(ms.length, "Matches")}${tile(b ? b.runs : 0, "Runs")}${tile(w ? w.wickets : 0, "Wickets")}</div>
-      ${b ? `<h3 class="eyebrow">Batting</h3><div class="tiles">${tile(`${b.best}${b.bestOut ? "" : "*"}`, "Highest")}${tile(b.avg != null ? b.avg.toFixed(1) : "–", "Average")}${tile(b.sr.toFixed(1), "Strike rate")}${tile(b.fifties, "50s")}${tile(b.hundreds, "100s")}${tile(b.sixes, "Sixes")}</div>` : ""}
-      ${w && w.balls ? `<h3 class="eyebrow">Bowling</h3><div class="tiles">${tile(`${w.bestW}/${w.bestR}`, "Best")}${tile(w.econ.toFixed(2), "Economy")}${tile(w.overs, "Overs")}</div>` : ""}
-      ${ms.length ? "" : `<p class="muted small">The numbers fill in after the first finished match.</p>`}`;
+    const chip = (act, v, cur, l) => `<button class="chip ${cur === v ? "on" : ""}" data-act="${act}" data-p="${id}" data-v="${v}">${esc(l)}</button>`;
+    const chips = all.tours.length > 1 ? `<div class="chips chips-scroll">${chip("career-pick", "all", C.pick, "All matches")}${all.tours.map((t) => chip("career-pick", t.id, C.pick, t.short || t.name)).join("")}</div>` : "";
+    const title = C.pick === "all" ? "Career" : esc((all.tours.find((t) => t.id === C.pick) || {}).name || "Tournament");
+    const view = C.view === "bowl" ? "bowl" : "bat";
+    const grid = view === "bat"
+      ? statGrid([["Matches", c.matches], ["Innings", b.inns], ["Runs", b.runs], ["Balls", b.balls], ["Highest", `${b.best}${b.bestOut ? "" : "*"}`], ["Average", one(b.avg, 1)],
+        ["Strike rate", one(b.sr, 1)], ["Not outs", b.notOuts], ["Fours", b.fours], ["Sixes", b.sixes], ["30s", b.thirties], ["50s", b.fifties], ["100s", b.hundreds], ["Ducks", b.ducks], ["Won", `${c.wins} of ${c.matches}`]])
+      : statGrid([["Matches", c.matches], ["Innings", w.inns], ["Overs", w.overs], ["Runs", w.runs], ["Wickets", w.wickets], ["Best", `${w.bestW}/${w.bestR}`],
+        ["Economy", one(w.econ, 2)], ["Average", one(w.avg, 1)], ["Strike rate", one(w.sr, 1)], ["3 wickets", w.threes], ["5 wickets", w.fives], ["Won", `${c.wins} of ${c.matches}`]]);
+    const tours = C.pick === "all" && all.tours.length ? `<h3 class="eyebrow">By tournament</h3><div class="table-wrap"><table class="tbl"><thead><tr><th>Tournament</th><th>M</th><th>Runs</th><th>Avg</th><th>Wkts</th></tr></thead><tbody>
+      ${all.tours.map((t) => `<tr><td><button class="link-btn wrap-btn" data-act="career-pick" data-p="${id}" data-v="${t.id}">${esc(t.name)}</button></td><td>${t.matches}</td><td><b>${t.bat.runs}</b></td><td>${one(t.bat.avg, 1)}</td><td><b>${t.bowl.wickets}</b></td></tr>`).join("")}</tbody></table></div>` : "";
+    const recent = c.innings.slice(0, 5).map((i) => {
+      const fig = [i.bat ? `${i.bat.runs}${i.bat.out ? "" : "*"} (${i.bat.balls})` : "", i.bowl ? `${i.bowl.wickets}/${i.bowl.runs} (${i.bowl.overs})` : ""].filter(Boolean).join(" · ") || "Did not bat or bowl";
+      const res = i.tie ? `<span class="res res-t">T</span>` : `<span class="res ${i.won ? "res-w" : "res-l"}">${i.won ? "W" : "L"}</span>`;
+      return `<li><button class="t-row" data-act="career-match" data-t="${i.tournamentId}" data-id="${i.matchId}">${res}<span class="t-text"><b>v ${esc((C.teams.get(i.vsId) || {}).name || "Opponent")}</b><small class="muted">${esc([dateOf(i.date), fig].filter(Boolean).join(" · "))}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`;
+    }).join("");
+    return `<div class="row-between"><h2 class="eyebrow">${title}</h2><button class="btn btn-small btn-primary" data-act="career-card" data-p="${id}">Player card</button></div>${chips}
+      <div class="tiles">${tile(c.matches, "Matches")}${tile(b.runs, "Runs")}${tile(w.wickets, "Wickets")}</div>
+      <div class="chips seg">${chip("career-view", "bat", view, "Batting")}${chip("career-view", "bowl", view, "Bowling")}</div>
+      <div class="card stack-s"><div class="row-between"><h3 class="eyebrow">Recent form</h3><small class="muted">Oldest → latest</small></div>${formChart(C, c, view)}</div>
+      ${grid}
+      ${tours}
+      ${recent ? `<h3 class="eyebrow">Recent matches</h3><ul class="t-list">${recent}</ul>` : ""}`;
   }
 
   function accountHtml() {
@@ -472,6 +516,16 @@
       startPick("request", L.tour.t);
     },
     "career-pick"(d) { if (careers[d.p]) { careers[d.p].pick = d.v; ui.render(); } },
+    "career-view"(d) { if (careers[d.p]) { careers[d.p].view = d.v; ui.render(); } },
+    async "career-match"(d) { await lg.openTour(d.t, "matches"); await lg.openMatch(d.id); },
+    async "career-card"(d) {
+      const C = careers[d.p];
+      if (!C || !CSA.studio) return;
+      const back = ui.view().screen;
+      ui.toast("Making the card…");
+      const card = await CSA.studio.careerCard(d.p, C);
+      if (card) CSA.studio.show(card, back === "profile" ? () => ui.actions.nav({ tab: "profile" }) : () => CSA.squad.openPlayer(d.p));
+    },
     "theme-toggle"() { setTheme(isDark() ? "light" : "dark"); },
     "theme-set"(d) { setTheme(d.v); },
     "tj-pick"(d) { H.pick.team = d.id; ui.render(); },

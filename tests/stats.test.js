@@ -110,3 +110,30 @@ test("player of the tournament adds up batting and bowling points", () => {
   assert.deepEqual(list.map((x) => [x.id, x.pts, x.played]), [["p1", 96, 1], ["p2", 68, 1]]);
   assert.equal(list[0].teamId, "A");
 });
+
+test("career adds up a player's matches, per tournament and newest first", () => {
+  const { match, s } = played();
+  const summary = St.summarize(match, s, [["t1", "t2", "t3", "t4"], ["l1", "l2", "l3", "l4"]]);
+  const ms = [
+    { id: "m1", tournament_id: "X", tournaments: { name: "Cup X", short_name: "CX" }, team1_id: "A", team2_id: "B", status: "done", winner_team_id: "A", starts_at: "2026-10-01", summary },
+    { id: "m2", tournament_id: "Y", tournaments: { name: "Cup Y", short_name: "CY" }, team1_id: "A", team2_id: "B", status: "done", winner_team_id: "B", starts_at: "2026-10-05", summary },
+    { id: "m3", tournament_id: "Y", team1_id: "A", team2_id: "B", status: "live", summary },
+  ];
+  const c = St.career(ms, "t1");
+  assert.equal(c.matches, 2);
+  assert.equal(c.wins, 1);
+  assert.equal(c.bat.runs, 20);
+  assert.equal(c.bat.best, 10);
+  assert.equal(c.bat.avg, null);
+  assert.equal(c.bowl.wickets, 6);
+  assert.equal(c.bowl.bestW, 3);
+  assert.equal(c.bowl.threes, 2);
+  assert.deepEqual(c.tours.map((t) => [t.id, t.matches, t.bat.runs]), [["Y", 1, 10], ["X", 1, 10]]);
+  assert.deepEqual(c.innings.map((i) => i.matchId), ["m2", "m1"]);
+  assert.equal(c.innings[0].won, false);
+  // A Lions batter who was bowled first ball: a duck.
+  const l = St.career(ms, "l3");
+  assert.equal(l.bat.ducks, 2);
+  assert.equal(l.bat.avg, 0);
+  assert.equal(St.career(ms, "nobody").matches, 0);
+});
