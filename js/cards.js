@@ -28,7 +28,7 @@
   const TABLE_STYLES = [["L", "Ladder"], ["G", "Glass"], ["T", "Leader"]];
   const LEADER_STYLES = [["S", "Spotlight"], ["P", "Podium"], ["B", "Board"]];
   const AWARD_STYLES = [["C", "Crown"], ["G", "Gold"], ["F", "Frame"]];
-  const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"]];
+  const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"], ["P", "Team photo"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
@@ -2313,6 +2313,29 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // The whole team's photo across the top, the title over its lower edge. Without a photo it is the Trophy look.
+  function drawChampPhoto(ctx, W, H, th, d) {
+    const img = d.images.player; if (!img) { drawChampTrophy(ctx, W, H, th, d); return; }
+    const c = d.champions, T = teamTones(c.team, d), M = metalOf(c), ph = Math.min(H - 380, 1240), ty = ph + Math.round(Math.max(0, H - ph - 380) * 0.4);
+    const BG = mix(T.deep, "#000000", 0.4); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    const k = Math.max(W / img.width, ph / img.height), iw = img.width * k, ih = img.height * k;
+    ctx.drawImage(img, (W - iw) / 2, (ph - ih) * 0.4, iw, ih);
+    let g = ctx.createLinearGradient(0, 0, 0, 220); g.addColorStop(0, "rgba(0,0,0,0.6)"); g.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, 220);
+    g = ctx.createLinearGradient(0, ph - 360, 0, ph + 40); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG); ctx.fillStyle = g; ctx.fillRect(0, ph - 360, W, 400);
+    g = ctx.createRadialGradient(W / 2, H, 40, W / 2, H, 800); g.addColorStop(0, rgba(T.base, 0.75)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, ph, W, H - ph);
+    confetti(ctx, W, H, [M[1], "#FFFFFF", T.hi === T.tp.base ? T.acc : T.hi], 50, 260);
+    ctx.fillStyle = M[1]; fit(ctx, d.tournament.name.toUpperCase(), W - 340, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), 196, 92, 8);
+    if (c.season) { ctx.fillStyle = "#FFFFFF"; font(ctx, 22, 700, BODY); spaced(ctx, c.season, 197, 126, 6); }
+    const lr = 62; ctx.beginPath(); ctx.arc(110, 100, lr, 0, 7); ctx.fillStyle = rgba(mix(T.deep, "#000000", 0.3), 0.9); ctx.fill(); ctx.strokeStyle = metalGrad(ctx, M, 48, 38, 172, 162); ctx.lineWidth = 5; ctx.stroke();
+    logo(ctx, d.images.teams[0], c.team, 110, 100, lr * 1.45);
+    sponsorRow(ctx, d, W - 50, 84, "right", "rgba(255,255,255,0.7)");
+    champTitle(ctx, W / 2, ty + 40, (c.title || "Champions").toUpperCase(), 170, W - 70, M);
+    const nm = (c.team.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - 100, 84, 700); text(ctx, nm, W / 2, ty + 150, "center");
+    ctx.fillStyle = metalGrad(ctx, M, W / 2 - 90, 0, W / 2 + 90, 0); ctx.fillRect(W / 2 - 90, ty + 176, 180, 7);
+    if (c.result) { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, c.result, W - 160, 30, 600, BODY); text(ctx, c.result, W / 2, ty + 232, "center"); }
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.04);
+  }
+
   // The captain large beside the title, as if lifting the cup.
   function drawChampCaptain(ctx, W, H, th, d) {
     const c = d.champions, T = teamTones(c.team, d), M = metalOf(c), dy = H - 1350, cap = d.images.caps && d.images.caps[0];
@@ -2372,7 +2395,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
-    if (kind === "champions") { ({ T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "champions") { ({ P: drawChampPhoto, T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
     if (kind === "award") { ({ C: drawAwardCrown, G: drawAwardGold, F: drawAwardFrame })[style](ctx, W, H, th, d); return cv; }
     if (kind === "leaders") { ({ S: drawLeadSpotlight, P: drawLeadPodium, B: drawLeadBoard })[style](ctx, W, H, th, d); return cv; }
     if (kind === "table") { ({ L: drawTableLadder, G: drawTableGlass, T: drawTableLeader })[style](ctx, W, H, th, d); return cv; }

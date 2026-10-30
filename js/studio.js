@@ -617,10 +617,15 @@
   }
 
   // Cards with a player photo: upload another one for this card, or go back to the profile photo.
-  const HAS_PHOTO = new Set(["milestone", "potm", "award", "leaders"]);
+  const HAS_PHOTO = new Set(["milestone", "potm", "award", "leaders", "champions"]);
   function photoBox(c) {
     if (!HAS_PHOTO.has(c.kind)) return "";
     const custom = c.profilePhoto !== undefined;
+    // Champions and runners-up take a photo of the whole team, shown in the Team photo look.
+    if (c.kind === "champions") return `<div class="card stack-s"><span class="eyebrow">Team photo</span>
+      <p class="muted small">${custom ? "Using your team photo in the Team photo look." : "Add a photo of the whole team. It fills the top of the card in the Team photo look."} A wide photo works best.</p>
+      <div class="chips"><label class="chip file-btn">${custom ? "Upload another" : "Upload team photo"}<input type="file" accept="image/*" data-card-photo="1" hidden></label>
+      ${custom ? `<button class="chip" data-act="card-photo-reset">Remove photo</button>` : ""}</div></div>`;
     return `<div class="card stack-s"><span class="eyebrow">Player photo</span>
       <p class="muted small">${custom ? "Using the photo you uploaded, for this card only." : c.data.urls.player ? "From the player's profile." : "No profile photo yet, so the card shows a silhouette."} A PNG with no background looks best.</p>
       <div class="chips"><label class="chip file-btn">${custom ? "Upload another" : "Upload photo"}<input type="file" accept="image/*" data-card-photo="1" hidden></label>
@@ -745,9 +750,10 @@
     c.caption = currentCaption();
     try {
       if (t.dataset.cardPhoto) {
-        const out = await lg.shrink(file, 1400);
+        const out = await lg.shrink(file, c.kind === "champions" ? 2000 : 1400);
         if (c.profilePhoto === undefined) c.profilePhoto = c.data.urls.player || "";
         c.data.urls.player = out.url;
+        if (c.kind === "champions") c.style = "P";
       } else {
         const out = await lg.shrink(file, 400), sp = { id: String(Date.now()), url: out.canvas.toDataURL("image/png") };
         if (!saveSponsors(c.data.tournamentId, savedSponsors(c.data.tournamentId).concat(sp))) ui.toast("Added to this card only: this phone has no room to keep it.");
