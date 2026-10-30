@@ -91,7 +91,8 @@
       : `<div class="card stack-s join-card"><b>Play for ${esc(t.name)}?</b><p class="muted small">Ask to join, and the captain adds you to the squad.</p>
           <button class="btn btn-primary" data-act="team-ask">Ask to join</button></div>`;
     const pending = manage && T.pending.length ? `<p class="note">Waiting for approval: ${T.pending.map((x) => esc(x.short_name || x.name)).join(", ")}</p>` : "";
-    return head(esc(t.short_name)) + hero + `<section class="wrap stack">${tools}${join}${asks}${pending}
+    const follow = ui.followBtn ? ui.followBtn("team", t.id) : "";
+    return head(esc(t.short_name)).replace("</header>", `${follow}</header>`) + hero + `<section class="wrap stack">${tools}${join}${asks}${pending}
       <h2 class="eyebrow">Squad</h2>
       ${rows ? `<ul class="people">${rows}</ul>` : `<p class="muted">No players yet.${manage ? " Send the invite link and players add themselves." : ""}</p>`}
       ${tours}</section>`;

@@ -25,15 +25,26 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Install Capacitor
-        run: npm install --no-save @capacitor/cli@7 @capacitor/core@7 @capacitor/android@7 @capacitor/splash-screen@7 @capacitor/assets@3
+        # The push notifications plugin comes in once the repository secret GOOGLE_SERVICES_JSON
+        # (the google-services.json file from Firebase) is added: then the app gets wicket and
+        # result alerts as Android notifications.
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          PKGS="@capacitor/cli@7 @capacitor/core@7 @capacitor/android@7 @capacitor/splash-screen@7 @capacitor/assets@3"
+          if [ -n "$GSJ" ]; then PKGS="$PKGS @capacitor/push-notifications@7"; fi
+          npm install --no-save $PKGS
       - name: Copy the web app
         run: |
           mkdir -p www
           cp -r index.html privacy.html manifest.webmanifest icon.svg sw.js css js vendor icons www/
           cp android-assets/offline.html www/
       - name: Create the Android project
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           npx cap add android
+          if [ -n "$GSJ" ]; then printf '%s' "$GSJ" > android/app/google-services.json; fi
           npx @capacitor/assets generate --android --assetPath android-assets --iconBackgroundColor '#0E1A14' --iconBackgroundColorDark '#0E1A14' --splashBackgroundColor '#0E1A14' --splashBackgroundColorDark '#0E1A14'
           npx cap sync android
       - name: Build

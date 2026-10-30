@@ -581,3 +581,33 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
   .lv-tbl td { padding: 2px 6px; }
 }
 .live .over-label { display: none; }
+
+/* Follow a match, team or tournament (bell pill in the top bar) */
+.follow-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.12); color: var(--board-ink); font: inherit; font-weight: 700; font-size: 0.85rem; white-space: nowrap; flex: none; }
+.follow-btn.on { background: var(--turf); color: var(--on-turf); }
+.follow-btn svg { width: 16px; height: 16px; }
+@media (max-width: 360px) { .follow-btn span { display: none; } .follow-btn { padding: 0 10px; } }
+.feed-team small { font-family: var(--body); font-weight: 500; font-size: 0.75rem; color: var(--muted); }
+.score-screen .follow-btn { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.score-screen .follow-btn.on { background: var(--turf); border-color: var(--turf); color: var(--on-turf); }
+
+/* Fan's match page: live score, then Live / Scorecard / Overs / MVP / Info tabs */
+.score-screen.fan .score-body { flex: none; padding-top: 4px; }
+.fan-tabs { position: sticky; top: 0; margin: 0 -16px; padding: 0 4px; }
+.fan-body { padding-top: 4px; }
+.cm { list-style: none; margin: 0 -16px; padding: 0; }
+.cm li { padding: 11px 16px; border-bottom: 1px solid var(--line); font-size: 0.93rem; }
+.cm-ball { display: grid; grid-template-columns: 40px 1fr; gap: 10px; }
+.cm-n { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.cm-n .ball { min-width: 30px; height: 30px; font-size: 0.78rem; }
+.cm-t b { font-weight: 600; }
+.cm-4 { color: var(--turf); font-weight: 800; }
+.cm-w { color: var(--ball); font-weight: 800; }
+.cm-wk { background: var(--ball-soft); }
+.cm-out { display: block; margin-top: 3px; font-weight: 700; }
+.cm-over { background: var(--surface); }
+.cm-oh { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.cm-oh b { color: var(--ink); }
+.cm-ob { font-size: 0.86rem; margin-top: 3px; }
+.cm-ms { font-weight: 800; color: var(--amber); background: var(--amber-soft); }
+.cm-end { font-weight: 700; text-align: center; background: var(--board); color: var(--board-ink); }

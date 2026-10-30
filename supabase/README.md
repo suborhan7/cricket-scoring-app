@@ -39,3 +39,16 @@ Storage buckets `logos` and `photos` are public to view. Each user uploads into 
 ```
 PGHOST=/tmp PGPORT=5432 PGUSER=postgres supabase/tests/run.sh
 ```
+
+## Push notifications (wickets, results, card alerts)
+
+Every new alert row (`notifications`) calls the `push` Edge Function (`functions/push`), which sends it to the user's phones saved in `push_subscriptions`.
+
+1. Run `0014_live_follow.sql` and `0015_push_trigger.sql`.
+2. Deploy the function with JWT checking off (it checks its own secret): `supabase functions deploy push --no-verify-jwt`.
+3. Function secrets: `PUSH_SECRET` (any long random text), `VAPID_PUBLIC_KEY` (same as `pushKey` in `js/config.js`), `VAPID_PRIVATE_KEY`, and later `FCM_SERVICE_ACCOUNT` for the Android app.
+4. In the SQL Editor, tell the database where to send them:
+   `select vault.create_secret('https://<project>.supabase.co/functions/v1/push', 'push_url');`
+   `select vault.create_secret('<same PUSH_SECRET>', 'push_secret');`
+
+Browsers and the installed web app use Web Push. The Android app needs Firebase: add the repository secret `GOOGLE_SERVICES_JSON` (the app's `google-services.json`) so the APK build includes the push plugin, and set `FCM_SERVICE_ACCOUNT` on the function.
