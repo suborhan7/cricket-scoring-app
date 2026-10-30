@@ -632,3 +632,14 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .res-l { background: var(--ball-soft); color: var(--ball); }
 .res-t { background: var(--amber-soft); color: var(--amber); }
 .link-btn.wrap-btn { white-space: normal; max-width: none; text-align: left; padding: 4px 0; min-height: 36px; }
+
+/* Scoring pad: match cards strip under the score; lights up when a fifty or result card is new */
+.cards-strip { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 14px; border: 1px dashed var(--line); border-radius: 12px; background: none; color: var(--muted); font: inherit; font-size: 0.9rem; font-weight: 600; text-align: left; cursor: pointer; }
+.cards-strip .cs-icon { color: var(--turf); font-size: 0.85rem; }
+.cards-strip .cs-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cards-strip .chev { color: var(--muted); }
+.cards-strip:active { background: var(--surface); }
+.cards-strip.new { border: 1px solid var(--turf); border-style: solid; background: var(--turf-soft); color: var(--ink); animation: cs-pulse 1.6s ease-out 2; }
+.cards-strip .cs-dot { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--turf); color: var(--on-turf); font-size: 0.75rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+@keyframes cs-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--turf) 55%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+@media (prefers-reduced-motion: reduce) { .cards-strip.new { animation: none; } }
