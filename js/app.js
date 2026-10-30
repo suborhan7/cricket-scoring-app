@@ -297,7 +297,7 @@
     return `<div class="score-screen ${rec.readOnly ? "fan" : ""}"><header class="bar"><button class="icon-btn" data-act="match-back" aria-label="Back">←</button>
         <h1 class="score-title">${esc(t[0].name)} <em>v</em> ${esc(t[1].name)}</h1>${CSA.ui.matchBadge(rec)}${rec.readOnly ? "" : `<button class="btn btn-small btn-card" data-act="card">Scorecard</button>`}</header>
       ${scoreboard(s)}
-      <section class="wrap stack-s score-body">${action}${tools}</section></div>`;
+      <section class="wrap stack-s score-body">${rec.readOnly ? "" : CSA.ui.scoreExtra(rec, s)}${action}${tools}</section></div>`;
   }
 
   // ---------- Hand over and backup links (quick matches) ----------
@@ -700,6 +700,7 @@
     lastTab: "home",
     matchBadge: () => "",
     cardExtra: () => "",
+    scoreExtra: () => "",
     changed: () => {},
     go(screen, extra) { closeSheet(); view = Object.assign({ screen, tab: 0 }, extra || {}); render(); },
     view: () => view,

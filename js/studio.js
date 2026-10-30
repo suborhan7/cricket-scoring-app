@@ -723,10 +723,17 @@
   }
 
   Object.assign(ui.actions, {
-    "cards-match"() { const rec = ui.current(); if (rec) openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "card"); },
+    "cards-match"(d) {
+      const rec = ui.current();
+      if (!rec) return;
+      // Opening the list from the pad marks this match's milestones and result as seen.
+      if (d.from === "score") { rec.cardsSeen = cardNews(rec).total; CSA.store.save(rec); }
+      openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), d.from === "score" ? "score" : "card");
+    },
     "cards-back"() {
       const back = V.list && V.list.back;
       if (back === "card") ui.actions.card();
+      else if (back === "score" && ui.current()) ui.go("score");
       else if (back === "tour" && L.tour) lg.openTour(L.tour.id, "cards");
       else ui.actions.home();
     },
@@ -816,6 +823,26 @@
   // A "Cards" button under every scorecard, before the change log.
   const prevExtra = ui.cardExtra;
   ui.cardExtra = (rec) => `<button class="btn btn-primary" data-act="cards-match">Cards for this match</button>` + prevExtra(rec);
+
+  // On the scoring pad, a strip right under the score opens this match's cards. A fifty, hundred,
+  // three-for, five-for or result the scorer hasn't looked at yet lights it up.
+  function cardNews(rec) {
+    const s = E.replay(rec.match, rec.events), t = rec.match.teams;
+    const WORD = { fifty: "Fifty", hundred: "Hundred", threefor: "Three-for", fivefor: "Five-for" };
+    const news = s.milestones.map((ms) => `${WORD[ms.kind] || C.MILESTONE[ms.kind].word} card ready: ${t[ms.team].players[ms.player]}`);
+    if (s.result) news.push("Result card ready");
+    // An undone fifty comes back as new if it's scored again.
+    if ((rec.cardsSeen || 0) > news.length) rec.cardsSeen = news.length;
+    return { total: news.length, fresh: news.slice(Math.min(rec.cardsSeen || 0, news.length)) };
+  }
+  ui.scoreExtra = (rec) => {
+    if (rec.paused) return "";
+    const n = cardNews(rec), fresh = n.fresh;
+    const text = fresh.length ? fresh[fresh.length - 1] + (fresh.length > 1 ? ` +${fresh.length - 1}` : "") : "Cards for this match";
+    return `<button class="cards-strip ${fresh.length ? "new" : ""}" data-act="cards-match" data-from="score">
+      <span class="cs-icon" aria-hidden="true">${fresh.length ? "▲" : "★"}</span><span class="cs-text">${esc(text)}</span>
+      ${fresh.length ? `<span class="cs-dot">${fresh.length}</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`;
+  };
 
   CSA.studio = { tab, show, matchCards, openAlert, careerCard };
 })();
