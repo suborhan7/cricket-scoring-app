@@ -29,10 +29,11 @@
   const LEADER_STYLES = [["S", "Spotlight"], ["P", "Podium"], ["B", "Board"]];
   const AWARD_STYLES = [["C", "Crown"], ["G", "Gold"], ["F", "Frame"]];
   const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"], ["P", "Team photo"]];
+  const CAREER_STYLES = [["S", "Stat sheet"], ["T", "Trading card"], ["F", "Form guide"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : kind === "champions" ? CHAMP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : kind === "champions" ? CHAMP_STYLES : kind === "career" ? CAREER_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -2379,6 +2380,166 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Player profile cards: career numbers and recent form ----------
+  // d.career: { scope, role, headline [value, label], stats [[value, label] x6], form [{ v, label, out, tone }] oldest first,
+  //   formTitle, formStats [[value, label] x4] }. d.player as on the other player cards; d.tournament is the team or tournament.
+
+  // The jersey colours from the photo, but a white or black kit takes the team's colours instead.
+  function careerPalette(d) {
+    const J = root.CSA && root.CSA.jersey, img = d.images.player, plain = (h) => { const { s } = hueSat(h), l = lum(h); return s < 0.25 || l > 0.8 || l < 0.012; };
+    let c = null;
+    if (J && img) try { c = J.pickJerseyColors(img); } catch (e) { c = null; }
+    if ((!c || plain(c.primary)) && d.player.c1 && !plain(d.player.c1)) return paletteOf(d.player.c1, d.player.c2 || "#111111");
+    return jerseyPalette(d);
+  }
+  const FORM_TONE = (P) => ({ hot: P.mvp || P.accent, good: "#FFFFFF", low: "rgba(255,255,255,0.45)", duck: "#FF5A6A" });
+  function careerName(d) {
+    const words = d.player.name.trim().split(/\s+/);
+    return { first: words.length > 1 ? words.slice(0, -1).join(" ") : "", last: words[words.length - 1] };
+  }
+  // The recent innings as bars from (x, y) to (x + w, y + h): value on top, the opponent under each bar.
+  function formBars(ctx, d, P, x, y, w, h, big) {
+    const f = d.career.form, tone = FORM_TONE(P), n = Math.max(f.length, 5), gap = big ? 18 : 12, bw = (w - gap * (n - 1)) / n;
+    const max = Math.max(d.career.formMax || 50, ...f.map((b) => b.v));
+    const base = y + h - (big ? 40 : 30);
+    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x, base, w, 2);
+    if (!f.length) { ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, big ? 30 : 22, 600, BODY); text(ctx, "No innings yet", x + w / 2, base - 40, "center"); return; }
+    const x0 = x + ((n - f.length) * (bw + gap)) / 2;
+    f.forEach((b, i) => {
+      const bx = x0 + i * (bw + gap), top = base - 4 - Math.max(6, ((base - y - (big ? 56 : 40)) * b.v) / max);
+      const ink = tone[b.tone] || tone.good;
+      const g = ctx.createLinearGradient(0, top, 0, base); g.addColorStop(0, ink); g.addColorStop(1, rgba(b.tone === "hot" ? (P.mvp || P.accent) : b.tone === "duck" ? "#FF5A6A" : "#FFFFFF", b.tone === "low" ? 0.08 : 0.25));
+      ctx.fillStyle = b.tone === "low" ? "rgba(255,255,255,0.28)" : g; roundRect(ctx, bx, top, bw, base - 4 - top, Math.min(10, bw / 4)); ctx.fill();
+      ctx.fillStyle = b.tone === "low" ? "rgba(255,255,255,0.8)" : ink; fit(ctx, b.label, bw + gap - 4, big ? 40 : 28, 700, DISPLAY, 14); text(ctx, b.label, bx + bw / 2, top - 10, "center");
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; fit(ctx, b.vs || "", bw + gap - 4, big ? 20 : 16, 700, BODY, 10); text(ctx, b.vs || "", bx + bw / 2, base + (big ? 30 : 24), "center");
+    });
+  }
+  function careerHeader(ctx, W, d, y, right) {
+    tournamentMark(ctx, d, 60, y, 72);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, d.tournament.name.toUpperCase(), 520, 26, 700); text(ctx, d.tournament.name.toUpperCase(), 150, y + 34);
+    ctx.fillStyle = "rgba(255,255,255,0.6)"; font(ctx, 18, 600, BODY); spaced(ctx, (d.career.scope || "").toUpperCase(), 151, y + 62, 2);
+    if (right !== false) sponsorRow(ctx, d, W - 60, y + 10, "right", "rgba(255,255,255,0.55)");
+  }
+  function glassTile(ctx, x, y, w, h, v, l, acc, size) {
+    ctx.fillStyle = "rgba(255,255,255,0.08)"; roundRect(ctx, x, y, w, h, 16); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 2; roundRect(ctx, x, y, w, h, 16); ctx.stroke();
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, String(v), w - 40, size || 54, 700); text(ctx, String(v), x + 22, y + h * 0.56);
+    ctx.fillStyle = acc; fit(ctx, l.toUpperCase(), w - 40, 19, 700, BODY, 12); spaced(ctx, l.toUpperCase(), x + 23, y + h - 20, 2);
+  }
+
+  // Stat sheet: the Spotlight stage, the name and the headline number on the left, six career tiles and the form strip below.
+  function drawCareerSheet(ctx, W, H, th, d) {
+    const P = careerPalette(d), c = d.career, nm = careerName(d), dy = H - 1350, acc = P.mvp || P.accent;
+    const BG = mix(P.deep, "#000000", 0.35);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(760, 460 + dy * 0.3, 40, 760, 460 + dy * 0.3, 860 + dy * 0.3);
+    g.addColorStop(0, rgba(mix(P.base, "#FFFFFF", 0.08), 0.95)); g.addColorStop(0.55, rgba(P.deep, 0.7)); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 2;
+    for (let i = 0; i < 14; i++) { ctx.beginPath(); ctx.arc(780, 480 + dy * 0.3, 110 + i * 46, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+    if (d.player.no != null) { ctx.fillStyle = rgba(P.glow, 0.1); font(ctx, 620, 700); text(ctx, String(d.player.no), 790, 760 + dy * 0.35, "center"); }
+    const img = d.images.player, foot = 860 + dy * 0.6;
+    player(ctx, img, { cx: 770, bottom: foot, h: img ? 820 + dy * 0.5 : 620 + dy * 0.3, w: img ? 620 : 460 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, rgba(BG, 0.9)); g.addColorStop(0.4, rgba(BG, 0.45)); g.addColorStop(0.6, rgba(BG, 0));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, foot);
+    g = ctx.createLinearGradient(0, foot - 200, 0, foot); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG);
+    ctx.fillStyle = g; ctx.fillRect(0, foot - 200, W, 200); ctx.fillStyle = BG; ctx.fillRect(0, foot, W, H - foot);
+    careerHeader(ctx, W, d, 56);
+    const y = dy * 0.3;
+    ctx.fillStyle = acc; font(ctx, 26, 700, BODY); spaced(ctx, (c.role || "PLAYER").toUpperCase(), 64, 250 + y, 10); ctx.fillRect(64, 266 + y, 80, 6);
+    if (nm.first) { ctx.save(); ctx.fillStyle = acc; fit(ctx, nm.first, 480, 84, 400, SCRIPT, 30); ctx.translate(60, 350 + y); ctx.rotate(-0.05); text(ctx, nm.first, 0, 0); ctx.restore(); }
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, nm.last.toUpperCase(), 520, 120, 700); text(ctx, nm.last.toUpperCase(), 56, 460 + y);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, d.player.team || "", 500, 26, 600, BODY, 14); text(ctx, d.player.team || "", 62, 502 + y);
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, String(c.headline[0]), 520, 230, 700); text(ctx, String(c.headline[0]), 50, 716 + y);
+    ctx.fillStyle = acc; font(ctx, 28, 700, BODY); spaced(ctx, c.headline[1].toUpperCase(), 64, 790 + y, 6);
+    const gy = foot + 10, tw = (W - 120 - 32) / 3;
+    c.stats.slice(0, 6).forEach(([v, l], i) => glassTile(ctx, 60 + (i % 3) * (tw + 16), gy + Math.floor(i / 3) * 116, tw, 100, v, l, acc, 50));
+    const fy = gy + 252;
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 19, 700, BODY); spaced(ctx, (c.formTitle || "LAST INNINGS").toUpperCase(), 62, fy, 3);
+    formBars(ctx, d, P, 60, fy + 10, W - 120, H - fy - 80, false);
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; font(ctx, 15, 700, BODY); spaced(ctx, d.appName || "CRICPULSE", W - 60, H - 30, 4, "right");
+    grain(ctx, W, H, 0.06);
+  }
+
+  // Trading card: a framed collector's card in the jersey colours, the photo inside, a name ribbon and two columns of numbers.
+  function drawCareerCard(ctx, W, H, th, d) {
+    const P = careerPalette(d), c = d.career, nm = careerName(d), dy = H - 1350, acc = P.mvp || P.accent;
+    const BG = mix(P.deep, "#000000", 0.5);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.save(); for (let i = -8; i < 18; i++) { ctx.fillStyle = i % 2 ? rgba(P.base, 0.16) : "rgba(255,255,255,0.025)"; const x = i * 90; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 90, 0); ctx.lineTo(x + 90 - H * 0.4, H); ctx.lineTo(x - H * 0.4, H); ctx.fill(); } ctx.restore();
+    const cx = 110, cw = W - 220, cy = 90 + dy * 0.1, ch = 1170 + dy * 0.75, r = 46;
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.55)"; ctx.shadowBlur = 60; ctx.shadowOffsetY = 20;
+    let g = ctx.createLinearGradient(cx, cy, cx + cw, cy + ch); g.addColorStop(0, mix(P.base, "#FFFFFF", 0.12)); g.addColorStop(0.55, P.base); g.addColorStop(1, P.deep);
+    ctx.fillStyle = g; roundRect(ctx, cx, cy, cw, ch, r); ctx.fill(); ctx.restore();
+    ctx.save(); roundRect(ctx, cx, cy, cw, ch, r); ctx.clip();
+    const sheen = ctx.createLinearGradient(cx, cy, cx + cw, cy + ch * 0.6); sheen.addColorStop(0, "rgba(255,255,255,0)"); sheen.addColorStop(0.45, "rgba(255,255,255,0.12)"); sheen.addColorStop(0.55, "rgba(255,255,255,0)");
+    ctx.fillStyle = sheen; ctx.fillRect(cx, cy, cw, ch);
+    ctx.strokeStyle = "rgba(255,255,255,0.07)"; ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) { ctx.beginPath(); ctx.arc(W / 2, cy + 420 + dy * 0.1, 90 + i * 50, 0, Math.PI * 2); ctx.stroke(); }
+    const ribbon = cy + 690 + dy * 0.4, img = d.images.player;
+    player(ctx, img, { cx: W / 2 + 60, bottom: ribbon + 10, h: img ? 640 + dy * 0.4 : 520 + dy * 0.2, w: img ? 560 + dy * 0.2 : 420 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    g = ctx.createLinearGradient(0, ribbon - 160, 0, ribbon); g.addColorStop(0, rgba(P.base, 0)); g.addColorStop(1, rgba(P.deep, 0.85)); ctx.fillStyle = g; ctx.fillRect(cx, ribbon - 160, cw, 160);
+    ctx.fillStyle = mix(P.deep, "#000000", 0.25); ctx.fillRect(cx, ribbon, cw, ch);
+    ctx.restore();
+    ctx.strokeStyle = acc; ctx.lineWidth = 8; roundRect(ctx, cx + 4, cy + 4, cw - 8, ch - 8, r - 4); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2; roundRect(ctx, cx + 22, cy + 22, cw - 44, ch - 44, r - 18); ctx.stroke();
+    // Top left: the headline number and its label, the role, the shirt number.
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, String(c.headline[0]), 300, 150, 700); text(ctx, String(c.headline[0]), cx + 56, cy + 190);
+    ctx.fillStyle = "#FFFFFF"; font(ctx, 24, 700, BODY); spaced(ctx, c.headline[1].toUpperCase(), cx + 60, cy + 228, 4);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; font(ctx, 22, 700, BODY); spaced(ctx, (c.role || "PLAYER").toUpperCase(), cx + 60, cy + 270, 3);
+    if (d.player.no != null) { ctx.fillStyle = "rgba(255,255,255,0.9)"; font(ctx, 64, 700); text(ctx, `#${d.player.no}`, cx + 58, cy + 352); }
+    tournamentMark(ctx, d, cx + cw - 156, cy + 52, 100);
+    // The name on an accent ribbon.
+    ctx.fillStyle = acc; slant(ctx, cx - 30, ribbon - 4, cw + 60, 104, 26); ctx.fill();
+    ctx.fillStyle = lum(acc) > 0.4 ? "#0B0D12" : "#FFFFFF";
+    const full = d.player.name.toUpperCase(); fit(ctx, full, cw - 100, 72, 700); text(ctx, full, W / 2, ribbon + 74, "center");
+    // Two columns of numbers.
+    const sy = ribbon + 150 + dy * 0.04, colW = (cw - 140) / 2, rowH = 78 + dy * 0.06;
+    c.stats.slice(0, 6).forEach(([v, l], i) => {
+      const X = cx + 60 + (i % 2) * (colW + 20), Y = sy + Math.floor(i / 2) * rowH;
+      ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.fillRect(X, Y + 22, colW, 2);
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, l.toUpperCase(), colW - 130, 22, 700, BODY, 12); spaced(ctx, l.toUpperCase(), X, Y, 2);
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, String(v), 150, 54, 700); text(ctx, String(v), X + colW, Y + 6, "right");
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; fit(ctx, (c.scope || "").toUpperCase(), cw - 120, 20, 700, BODY, 12); spaced(ctx, (c.scope || "").toUpperCase(), W / 2, cy + ch - 46, 4, "center");
+    sponsorRow(ctx, d, 60, H - 76, "left", "rgba(255,255,255,0.6)");
+    appMark(ctx, W, H - 26);
+    grain(ctx, W, H, 0.05);
+  }
+
+  // Form guide: the last innings as the hero, a tall bar chart over a glass panel, the photo above on the right.
+  function drawCareerForm(ctx, W, H, th, d) {
+    const P = careerPalette(d), c = d.career, nm = careerName(d), dy = H - 1350, acc = P.mvp || P.accent;
+    const BG = mix(P.deep, "#000000", 0.4);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createLinearGradient(W, 0, 300, H * 0.7); g.addColorStop(0, P.mid); g.addColorStop(1, BG); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    g = ctx.createRadialGradient(820, 360, 30, 820, 360, 620); g.addColorStop(0, rgba(P.glow, 0.35)); g.addColorStop(1, rgba(P.glow, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // A rising line across the back, like a chart.
+    ctx.save(); ctx.strokeStyle = rgba(acc, 0.18); ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(-20, 620 + dy * 0.3); ctx.lineTo(300, 520 + dy * 0.3); ctx.lineTo(520, 580 + dy * 0.3); ctx.lineTo(W + 20, 260 + dy * 0.2); ctx.stroke(); ctx.restore();
+    const img = d.images.player, chartTop = 640 + dy * 0.45;
+    player(ctx, img, { cx: 800, bottom: chartTop + 30, h: img ? 600 + dy * 0.4 : 480 + dy * 0.2, w: img ? 520 : 400 }, { c1: d.player.c1, c2: d.player.c2 }, d.player.no);
+    g = ctx.createLinearGradient(0, chartTop - 140, 0, chartTop + 30); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, rgba(BG, 0.9)); ctx.fillStyle = g; ctx.fillRect(0, chartTop - 140, W, 170);
+    careerHeader(ctx, W, d, 56, false);
+    const y = dy * 0.2;
+    ctx.fillStyle = acc; font(ctx, 28, 700, BODY); spaced(ctx, "FORM GUIDE", 64, 262 + y, 12); ctx.fillRect(64, 280 + y, 90, 6);
+    if (nm.first) { ctx.save(); ctx.fillStyle = acc; fit(ctx, nm.first, 460, 80, 400, SCRIPT, 30); ctx.translate(60, 366 + y); ctx.rotate(-0.05); text(ctx, nm.first, 0, 0); ctx.restore(); }
+    ctx.fillStyle = "#FFFFFF"; fit(ctx, nm.last.toUpperCase(), 540, 124, 700); text(ctx, nm.last.toUpperCase(), 56, 480 + y);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; fit(ctx, `${d.player.team || ""}${c.role ? " · " + c.role : ""}`, 520, 26, 600, BODY, 14); text(ctx, `${d.player.team || ""}${c.role ? " · " + c.role : ""}`, 62, 524 + y);
+    // The chart on a glass panel.
+    const ph = 470 + dy * 0.25;
+    ctx.fillStyle = "rgba(0,0,0,0.32)"; roundRect(ctx, 40, chartTop, W - 80, ph, 28); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 2; roundRect(ctx, 40, chartTop, W - 80, ph, 28); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.8)"; font(ctx, 20, 700, BODY); spaced(ctx, (c.formTitle || "LAST INNINGS").toUpperCase(), 76, chartTop + 48, 3);
+    ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 18, 600, BODY); spaced(ctx, "OLDEST → LATEST", W - 76, chartTop + 48, 2, "right");
+    formBars(ctx, d, P, 76, chartTop + 80, W - 152, ph - 100, true);
+    const sy = chartTop + ph + 26, tw = (W - 80 - 3 * 14) / 4;
+    (c.formStats || c.stats).slice(0, 4).forEach(([v, l], i) => glassTile(ctx, 40 + i * (tw + 14), sy, tw, 112, v, l, acc, 56));
+    sponsorRow(ctx, d, 60, H - 86, "left", "rgba(255,255,255,0.6)");
+    appMark(ctx, W, H - 26);
+    grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -2395,6 +2556,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "career") { ({ S: drawCareerSheet, T: drawCareerCard, F: drawCareerForm })[style](ctx, W, H, th, d); return cv; }
     if (kind === "champions") { ({ P: drawChampPhoto, T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
     if (kind === "award") { ({ C: drawAwardCrown, G: drawAwardGold, F: drawAwardFrame })[style](ctx, W, H, th, d); return cv; }
     if (kind === "leaders") { ({ S: drawLeadSpotlight, P: drawLeadPodium, B: drawLeadBoard })[style](ctx, W, H, th, d); return cv; }
@@ -2485,6 +2647,11 @@
       const a = d.award;
       const stats = (a.stats || []).map(([v, s, lab]) => `${v}${s ? " " + s : ""} ${lab.toLowerCase()}`).join(", ");
       return `${a.title}, ${d.tournament.name}: ${d.player.name}${d.player.team ? ` (${d.player.team})` : ""}!${stats ? `\n${stats}` : ""}\n\n${tags.join(" ")}`;
+    }
+    if (kind === "career") {
+      const c = d.career;
+      tags.splice(1, 0, tag(d.player.teamShort || d.player.team));
+      return `${d.player.name}${d.player.team ? ` (${d.player.team})` : ""}, ${c.scope.toLowerCase()}:\n${c.stats.map(([v, l]) => `${l}: ${v}`).join(" · ")}${c.formText ? `\n${c.formText}` : ""}\n\n${tags.join(" ")}`;
     }
     if (kind === "target") {
       const t = d.target;
