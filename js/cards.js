@@ -28,10 +28,11 @@
   const TABLE_STYLES = [["L", "Ladder"], ["G", "Glass"], ["T", "Leader"]];
   const LEADER_STYLES = [["S", "Spotlight"], ["P", "Podium"], ["B", "Board"]];
   const AWARD_STYLES = [["C", "Crown"], ["G", "Gold"], ["F", "Frame"]];
+  const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : kind === "champions" ? CHAMP_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -2274,6 +2275,87 @@
     appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Champions and runners-up: Trophy, Captain and Banner ----------
+
+  // Gold for the champions, silver for the runners-up.
+  const metalOf = (c) => c.silver ? ["#FFFFFF", "#C9CED8", "#8A93A6"] : ["#FFF3C4", "#F5C542", "#B8860B"];
+  function metalGrad(ctx, M, x0, y0, x1, y1) { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, M[0]); g.addColorStop(0.5, M[1]); g.addColorStop(1, M[2]); return g; }
+  // Confetti in the team's colours and the metal, the same on every render.
+  function confetti(ctx, W, H, cols, n, top) {
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < n; i++) {
+      const x = rnd() * W, y = rnd() * (top || H), w = 8 + rnd() * 14, h = 4 + rnd() * 8;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rnd() * Math.PI); ctx.globalAlpha = 0.35 + rnd() * 0.5; ctx.fillStyle = cols[i % cols.length]; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.restore();
+    }
+  }
+  function champTitle(ctx, x, y, t, size, maxW, M, align) {
+    ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.16, 1, 0, 0); fit(ctx, t, maxW, size, 700); ctx.textAlign = align || "center";
+    ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillText(t, 6, 8); ctx.fillStyle = metalGrad(ctx, M, 0, -size * 0.8, 0, 0); ctx.fillText(t, 0, 0); ctx.restore();
+  }
+  const champSub = (c) => [c.result, c.season].filter(Boolean).join(" · ");
+
+  // The team's crest in a metal ring under a burst of rays and confetti.
+  function drawChampTrophy(ctx, W, H, th, d) {
+    const c = d.champions, T = teamTones(c.team, d), M = metalOf(c), dy = H - 1350, cy = 640 + dy * 0.45, r = 260 + dy * 0.08;
+    const BG = mix(T.deep, "#000000", 0.4); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(W / 2, cy, 40, W / 2, cy, 800); g.addColorStop(0, rgba(T.base, 1)); g.addColorStop(0.6, rgba(T.deep, 0.55)); g.addColorStop(1, rgba(BG, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (T.red) { const g2 = ctx.createRadialGradient(0, 160, 20, 0, 160, 700); g2.addColorStop(0, rgba(T.P.base, 0.55)); g2.addColorStop(1, rgba(T.P.base, 0)); ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H); }
+    ctx.save(); ctx.translate(W / 2, cy); for (let i = 0; i < 40; i++) { ctx.rotate(Math.PI / 20); ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.03)" : rgba(M[1], 0.07); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-55, -1500); ctx.lineTo(55, -1500); ctx.fill(); } ctx.restore();
+    confetti(ctx, W, H, [M[1], T.hi === T.tp.base ? T.acc : T.hi, "#FFFFFF", T.base], 90, H * 0.75);
+    ctx.fillStyle = M[1]; fit(ctx, d.tournament.name.toUpperCase(), W - 160, 26, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, 78 + dy * 0.15, 10, "center");
+    champTitle(ctx, W / 2, 230 + dy * 0.2, (c.title || "Champions").toUpperCase(), 150, W - 80, M);
+    ctx.beginPath(); ctx.arc(W / 2, cy, r, 0, 7); ctx.fillStyle = rgba(mix(T.deep, "#000000", 0.3), 0.85); ctx.fill();
+    ctx.strokeStyle = rgba(M[1], 0.3); ctx.lineWidth = 34; ctx.stroke(); ctx.strokeStyle = metalGrad(ctx, M, W / 2 - r, cy - r, W / 2 + r, cy + r); ctx.lineWidth = 10; ctx.stroke();
+    logo(ctx, d.images.teams[0], c.team, W / 2, cy, r * 1.3);
+    const nm = (c.team.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 12; fit(ctx, nm, W - 100, 92, 700); text(ctx, nm, W / 2, cy + r + 130, "center"); ctx.shadowBlur = 0;
+    const sub = champSub(c); if (sub) { font(ctx, 28, 600, BODY); const w = Math.min(W - 80, ctx.measureText(sub).width + 80), y = cy + r + 172; ctx.fillStyle = metalGrad(ctx, M, W / 2 - w / 2, 0, W / 2 + w / 2, 0); slant(ctx, W / 2 - w / 2, y, w, 58, 14); ctx.fill(); ctx.fillStyle = "#1A1405"; fit(ctx, sub, w - 60, 28, 700, BODY, 14); text(ctx, sub, W / 2, y + 39, "center"); }
+    sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // The captain large beside the title, as if lifting the cup.
+  function drawChampCaptain(ctx, W, H, th, d) {
+    const c = d.champions, T = teamTones(c.team, d), M = metalOf(c), dy = H - 1350, cap = d.images.caps && d.images.caps[0];
+    const BG = mix(T.deep, "#000000", 0.45); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(W * 0.72, H * 0.45, 40, W * 0.72, H * 0.45, 760); g.addColorStop(0, rgba(T.base, 0.95)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    g = ctx.createRadialGradient(0, 0, 20, 0, 0, 760); g.addColorStop(0, rgba(T.red ? T.P.base : M[1], T.red ? 0.6 : 0.18)); g.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    confetti(ctx, W, H, [M[1], "#FFFFFF", T.hi === T.tp.base ? T.acc : T.hi], 60, H * 0.55);
+    ctx.fillStyle = "rgba(255,255,255,0.06)"; font(ctx, 520, 700); text(ctx, c.team.short || "", W + 30, H * 0.62, "right");
+    if (cap) bust(ctx, cap, W * 0.72, H - 250, 780 + dy * 0.6); else logo(ctx, d.images.teams[0], c.team, W * 0.68, H * 0.48, 460);
+    g = ctx.createLinearGradient(0, H - 520, 0, H - 230); g.addColorStop(0, rgba(BG, 0)); g.addColorStop(1, BG); ctx.fillStyle = g; ctx.fillRect(0, H - 520, W, 520);
+    ctx.fillStyle = M[1]; fit(ctx, d.tournament.name.toUpperCase(), 560, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), 60, 90 + dy * 0.15, 8);
+    if (cap) logo(ctx, d.images.teams[0], c.team, 120, 220 + dy * 0.2, 130);
+    const words = (c.title || "Champions").toUpperCase().split(" ");
+    words.forEach((w, i) => champTitle(ctx, 56, (cap ? 420 : 300) + dy * 0.25 + i * 120, w, 140, W * 0.5, M, "left"));
+    if (c.season) { ctx.fillStyle = "#FFFFFF"; font(ctx, 64, 700); text(ctx, c.season, 62, (cap ? 420 : 300) + dy * 0.25 + words.length * 120 - 10); }
+    const nm = (c.team.name || "").toUpperCase(); ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, W - 120, 90, 700); text(ctx, nm, 56, H - 210);
+    ctx.fillStyle = metalGrad(ctx, M, 0, 0, W, 0); ctx.fillRect(56, H - 186, 160, 8);
+    if (c.result) { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, c.result, W - 120, 30, 600, BODY); text(ctx, c.result, 58, H - 134); }
+    sponsorRow(ctx, d, W - 50, 84, "right", "rgba(255,255,255,0.55)");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
+  // A pennant in the team's colours hangs from the top with the crest; stripes behind.
+  function drawChampBanner(ctx, W, H, th, d) {
+    const c = d.champions, T = teamTones(c.team, d), M = metalOf(c), dy = H - 1350, P = T.P;
+    const BG = mix(P.deep, "#000000", 0.45); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.save(); for (let i = -6; i < 16; i++) { ctx.fillStyle = i % 2 ? rgba(T.base, 0.2) : "rgba(255,255,255,0.03)"; ctx.beginPath(); const x = i * 110; ctx.moveTo(x, 0); ctx.lineTo(x + 110, 0); ctx.lineTo(x + 110 - H * 0.5, H); ctx.lineTo(x - H * 0.5, H); ctx.fill(); } ctx.restore();
+    const g = ctx.createRadialGradient(W / 2, H * 0.35, 40, W / 2, H * 0.35, 800); g.addColorStop(0, rgba(T.base, 0.55)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    confetti(ctx, W, H, [M[1], "#FFFFFF", T.base], 70, H);
+    const px = 170, pw = W - 340, ph = 880 + dy * 0.45, cut = 130;
+    ctx.save(); ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px + pw, 0); ctx.lineTo(px + pw, ph); ctx.lineTo(W / 2, ph + cut); ctx.lineTo(px, ph); ctx.closePath();
+    const gp = ctx.createLinearGradient(0, 0, 0, ph + cut); gp.addColorStop(0, T.base); gp.addColorStop(1, mix(T.deep, "#000000", 0.25)); ctx.fillStyle = gp; ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 40; ctx.fill(); ctx.restore();
+    ctx.beginPath(); ctx.moveTo(px + 16, 0); ctx.lineTo(px + 16, ph - 8); ctx.lineTo(W / 2, ph + cut - 26); ctx.lineTo(px + pw - 16, ph - 8); ctx.lineTo(px + pw - 16, 0); ctx.strokeStyle = metalGrad(ctx, M, 0, 0, 0, ph); ctx.lineWidth = 6; ctx.stroke();
+    ctx.fillStyle = M[1]; fit(ctx, d.tournament.name.toUpperCase(), pw - 80, 24, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, 90 + dy * 0.1, 8, "center");
+    champTitle(ctx, W / 2, 230 + dy * 0.15, (c.title || "Champions").toUpperCase(), 118, pw - 60, M);
+    if (c.season) { ctx.fillStyle = "#FFFFFF"; font(ctx, 26, 700, BODY); spaced(ctx, c.season, W / 2 + 4, 284 + dy * 0.15, 10, "center"); }
+    logo(ctx, d.images.teams[0], c.team, W / 2, 330 + dy * 0.2 + (ph - 330 - dy * 0.2) / 2 + 20, Math.min(pw - 120, ph - 380));
+    const nm = (c.team.name || "").toUpperCase(), ny = ph + cut + 140; ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 12; fit(ctx, nm, W - 100, 100, 700); text(ctx, nm, W / 2, ny, "center"); ctx.shadowBlur = 0;
+    if (c.result) { ctx.fillStyle = "rgba(255,255,255,0.85)"; fit(ctx, c.result, W - 160, 30, 600, BODY); text(ctx, c.result, W / 2, ny + 56, "center"); }
+    sponsorRow(ctx, d, 50, H - 86, "left", "rgba(255,255,255,0.6)");
+    appMark(ctx, W, H - 20); grain(ctx, W, H, 0.05);
+  }
+
   // Draws a card and resolves with the canvas. `d.urls` lists the images to load first.
   async function render(kind, d, size, style) {
     const [W, H] = SIZES[size] || SIZES.post;
@@ -2290,6 +2372,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "champions") { ({ T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
     if (kind === "award") { ({ C: drawAwardCrown, G: drawAwardGold, F: drawAwardFrame })[style](ctx, W, H, th, d); return cv; }
     if (kind === "leaders") { ({ S: drawLeadSpotlight, P: drawLeadPodium, B: drawLeadBoard })[style](ctx, W, H, th, d); return cv; }
     if (kind === "table") { ({ L: drawTableLadder, G: drawTableGlass, T: drawTableLeader })[style](ctx, W, H, th, d); return cv; }

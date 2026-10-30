@@ -453,7 +453,7 @@
   }
 
   // Champions, or with `silver` the runners-up of the final.
-  function championsCard(T, silver) {
+  async function championsCard(T, silver) {
     const c = champion(T);
     if (!c || (silver && !c.second)) return null;
     const t = lg.teamById(silver ? c.second : c.id), ti = tournamentInfo(T.t);
@@ -461,6 +461,9 @@
     const title = silver ? "Runners-up" : c.series ? "Series winners" : "Champions";
     const d = base({ ti }, { champions: { team: teamInfo(t), title, silver: !!silver, result: silver ? c.secondResult : c.result, season: T.t.name.includes(year) ? "" : year } });
     d.urls.teams = [logoOf(t)];
+    // The captain lifts the trophy in the Captain look.
+    const caps = await captainPhotos([t.id]).catch(() => new Map());
+    d.urls.caps = [caps.get(t.id) || ""];
     return { kind: "champions", data: d, title: `${t.short_name}, ${title.toLowerCase()}` };
   }
 
@@ -694,7 +697,7 @@
     async "card-lineup"(d) { const rec = await loadMatch(L.tour.matches.find((x) => x.id === d.id)); if (rec) show(await lineupCard(rec), "tour"); },
     async "card-squad"(d) { ui.toast("Loading squad…"); const card = await squadCard(L.tour, d.id); if (card) show(card, "tour"); },
     async "card-leaders"(d) { const card = await leadersCard(L.tour, d.k); if (card) show(card, "tour"); },
-    "card-champions"(d) { const card = championsCard(L.tour, d.silver === "1"); if (card) show(card, "tour"); },
+    async "card-champions"(d) { const card = await championsCard(L.tour, d.silver === "1"); if (card) show(card, "tour"); },
     async "card-match"(d) {
       const m = L.tour.matches.find((x) => x.id === d.id);
       const rec = m && await loadMatch(m);
