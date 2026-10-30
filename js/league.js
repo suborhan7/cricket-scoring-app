@@ -121,6 +121,8 @@
   // ---------- Live and recent matches (everyone, signed in or not) ----------
 
   L.feed = null;
+  let feedSig = "";
+  const feedTeams = new Map();
   async function loadFeed() {
     const cols = "id, tournament_id, team1_id, team2_id, status, result_text, winner_team_id, summary, stage, created_at, tournaments(name, short_name)";
     const q = (c) => sb.from("matches").select(c).in("status", ["live", "done"]).order("created_at", { ascending: false }).limit(12);
@@ -128,10 +130,18 @@
     let { data, error } = await q(L.noLive ? cols : cols + ", live");
     if (error && /live/.test(error.message || "")) { L.noLive = true; ({ data, error } = await q(cols)); }
     if (error) return;
-    const ids = [...new Set([].concat(...data.map((m) => [m.team1_id, m.team2_id])))];
-    const teams = ids.length ? (await sb.from("teams").select("id, name, short_name, logo_path, primary_color, secondary_color").in("id", ids)).data || [] : [];
-    const byId = new Map(teams.map((t) => [t.id, t]));
-    L.feed = data.map((m) => Object.assign(m, { a: byId.get(m.team1_id) || { short_name: "?" }, b: byId.get(m.team2_id) || { short_name: "?" } }))
+    // Nothing changed since the last check: no team lookup and no redraw.
+    const sig = JSON.stringify(data);
+    if (L.feed && sig === feedSig) return;
+    feedSig = sig;
+    // Teams are looked up once and then kept; only teams new to the feed are asked for.
+    const ids = [...new Set([].concat(...data.map((m) => [m.team1_id, m.team2_id])))].filter((id) => !feedTeams.has(id));
+    if (ids.length) {
+      const { data: teams, error: tErr } = await sb.from("teams").select("id, name, short_name, logo_path, primary_color, secondary_color").in("id", ids);
+      if (tErr) feedSig = ""; // ask again on the next check
+      for (const t of teams || []) feedTeams.set(t.id, t);
+    }
+    L.feed = data.map((m) => Object.assign(m, { a: feedTeams.get(m.team1_id) || { short_name: "?" }, b: feedTeams.get(m.team2_id) || { short_name: "?" } }))
       .sort((x, y) => (y.status === "live") - (x.status === "live") || String(y.created_at).localeCompare(String(x.created_at)));
     rerender("home");
   }
@@ -798,14 +808,20 @@
   async function watchMatch(m, quiet) {
     if (!quiet) ui.toast("Loading match…");
     const ids = [].concat(...((m.lineups && m.lineups.teams) || []).map((x) => x.players));
+    // The balls come with the match's sync version in one request (migration 0017), so a
+    // scorer picking the match up here can't overwrite balls saved after it loaded them.
+    const oldEvents = () => sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq")
+      .then(({ data, error }) => { if (error) throw error; return { events: data.map((r) => r.event), version: null }; });
     const [players, events] = await Promise.all([
       sb.from("players").select("id, full_name").in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]),
-      sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq"),
+      (L.noSyncRpc ? oldEvents() : serverEvents(m.id).catch((e) => { if (!/events_version/.test(e.message || "")) throw e; L.noSyncRpc = true; return oldEvents(); }))
+        .then((data) => ({ data }), (error) => ({ error })),
     ]);
     if (players.error || events.error) return ui.toast(errText(players.error || events.error));
     const names = new Map(players.data.map((p) => [p.id, p.full_name]));
     const rec = buildRec(m, m.lineups.teams.map((x) => x.players.map((pid) => names.get(pid) || "Player")));
-    rec.events = events.data.map((r) => r.event);
+    rec.events = events.data.events;
+    rec.syncVersion = events.data.version;
     rec.synced = rec.events.map((e) => JSON.stringify(e));
     rec.cloudStatus = m.status;
     rec.cloudResult = m.result_text || null;
@@ -917,55 +933,134 @@
     timers[rec.match.id] = setTimeout(() => syncRec(rec), 400);
   };
 
+  // One sync at a time per match, so a slow sync of one match never holds up another.
+  const busy = {};
+  // A request that hangs on bad signal gives up after 20 s; the next sync tries again.
+  const timeout = () => (window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined);
+  // The database keeps an event's keys in its own order, so events are compared key by key.
+  const canon = (v) => (v && typeof v === "object" ? Array.isArray(v) ? `[${v.map(canon)}]` : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`)}}` : JSON.stringify(v));
+  const same = (a, b) => canon(a) === canon(b);
+  const findMatch = (id) => L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
+
   async function syncRec(rec) {
     if (!L.user) return setBadge(rec, "signin");
-    if (syncRec.busy) { clearTimeout(timers[rec.match.id]); timers[rec.match.id] = setTimeout(() => syncRec(rec), 600); return; }
-    syncRec.busy = true;
-    const id = rec.match.cloud.matchId, ev = rec.events.slice(), prev = rec.synced || [];
+    const key = rec.match.id;
+    if (busy[key]) { clearTimeout(timers[key]); timers[key] = setTimeout(() => syncRec(rec), 600); return; }
+    busy[key] = true;
+    const ev = rec.events.slice();
     try {
-      if (prev.length > ev.length) {
-        const { error } = await sb.from("match_events").delete().eq("match_id", id).gte("seq", ev.length);
-        if (error) throw error;
-      }
-      const rows = [];
-      ev.forEach((e, seq) => { if (prev[seq] !== JSON.stringify(e)) rows.push({ match_id: id, seq, event: e }); });
-      if (rows.length) {
-        const { error } = await sb.from("match_events").upsert(rows, { onConflict: "match_id,seq" });
-        if (error) throw error;
-      }
-      const s = E.replay(rec.match, ev), status = s.result ? "done" : "live";
-      const statusChanged = status !== rec.cloudStatus;
-      const resultText = s.result ? s.result.text : null;
-      // A ball fixed after the match ended can change the margin or even the winner, so the
-      // result is sent again whenever it differs from the one the server has.
-      if (statusChanged || (s.result && resultText !== rec.cloudResult)) {
-        const upd = { status, result_text: resultText, winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null };
-        const { error } = await sb.from("matches").update(upd).eq("id", id);
-        if (error) throw error;
-        rec.cloudStatus = status; rec.cloudResult = resultText;
-        const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
-        if (m) Object.assign(m, upd);
-      }
-      // The points table and leaders read this summary. It goes separately so that a database
-      // without the summary column (migration 0002 not run yet) still syncs every ball.
-      if (s.result && (statusChanged || rows.length || prev.length > ev.length)) {
-        const summary = CSA.stats.summarize(rec.match, s, rec.match.cloud.playerIds);
-        const { error } = await sb.from("matches").update({ summary }).eq("id", id);
-        if (error) console.warn("Match summary not saved:", error.message);
-        const m = L.tour && L.tour.matches && L.tour.matches.find((x) => x.id === id);
-        if (m && !error) m.summary = summary;
-      }
+      const s = L.noSyncRpc ? await syncOld(rec, ev) : await syncSafe(rec, ev);
+      if (!s) return; // another phone's balls were loaded instead, or this sync goes again
       if (CSA.alerts) CSA.alerts.afterSync(rec, s);
-      if (CSA.live) CSA.live.afterSync(rec, s);
+      if (CSA.live) CSA.live.afterSync(rec, s, !L.noSyncRpc);
       rec.synced = ev.map((e) => JSON.stringify(e));
       const cur = S.get(rec.match.id);
-      if (cur) { cur.synced = rec.synced; cur.cloudStatus = rec.cloudStatus; cur.cloudResult = rec.cloudResult; S.save(cur); }
-      syncRec.busy = false;
+      if (cur) { cur.synced = rec.synced; cur.syncVersion = rec.syncVersion; cur.cloudStatus = rec.cloudStatus; cur.cloudResult = rec.cloudResult; S.save(cur); }
       if (pending(rec)) ui.changed(rec); else setBadge(rec, "saved");
     } catch (e) {
-      syncRec.busy = false;
       setBadge(rec, "offline");
+    } finally {
+      busy[key] = false;
     }
+  }
+
+  // The match columns a sync sets: the result (sent every time, since a fixed ball can change
+  // the margin or the winner), the summary the points table and leaders read, and the live score.
+  function matchUpdate(rec, s, ev) {
+    const upd = {
+      status: s.result ? "done" : "live",
+      result_text: s.result ? s.result.text : null,
+      winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null,
+    };
+    if (s.result) upd.summary = CSA.stats.summarize(rec.match, s, rec.match.cloud.playerIds);
+    if (CSA.commentary && !rec.noLive) upd.live = CSA.commentary.snapshot(rec.match, s, ev);
+    return upd;
+  }
+
+  // Sends the whole sync to sync_match (migration 0017), which saves it all or nothing, and only
+  // if no other phone saved balls for this match since this phone's last sync.
+  async function syncSafe(rec, ev) {
+    const id = rec.match.cloud.matchId, prev = rec.synced || [];
+    const balls = [];
+    ev.forEach((e, seq) => { if (prev[seq] !== JSON.stringify(e)) balls.push({ seq, event: e }); });
+    const s = E.replay(rec.match, ev), upd = matchUpdate(rec, s, ev);
+    const expected = rec.syncVersion == null ? null : rec.syncVersion;
+    const { data, error } = await sb.rpc("sync_match", { m: id, expected, keep: ev.length, balls, upd }).abortSignal(timeout());
+    if (error && (error.code === "PGRST202" || error.code === "42883")) { L.noSyncRpc = true; return syncOld(rec, ev); }
+    if (error) throw error;
+    if (!data.ok) return conflict(rec, ev);
+    rec.syncVersion = data.version;
+    rec.cloudStatus = upd.status; rec.cloudResult = upd.result_text;
+    const m = findMatch(id);
+    if (m) Object.assign(m, upd);
+    return s;
+  }
+
+  // The match's balls as the server has them, with the version they belong to.
+  async function serverEvents(id) {
+    const { data, error } = await sb.from("matches").select("status, result_text, events_version, match_events(seq, event)").eq("id", id).single();
+    if (error) throw error;
+    const rows = (data.match_events || []).sort((a, b) => a.seq - b.seq);
+    return { events: rows.map((r) => r.event), version: data.events_version, status: data.status, result: data.result_text || null };
+  }
+
+  // Someone saved balls for this match since this phone's last sync. If that was this phone
+  // (its answer got lost on bad signal), carry on from there. Otherwise another phone is
+  // scoring: its balls win and this phone shows them.
+  async function conflict(rec, ev) {
+    const srv = await serverEvents(rec.match.cloud.matchId);
+    const ours = srv.events.length >= (rec.synced || []).length && srv.events.length <= ev.length && srv.events.every((e, i) => same(e, ev[i]));
+    rec.syncVersion = srv.version;
+    rec.cloudStatus = srv.status; rec.cloudResult = srv.result;
+    if (!ours) {
+      rec.events = srv.events;
+      rec.synced = srv.events.map((e) => JSON.stringify(e));
+      S.save(rec);
+      ui.toast("Another phone is scoring this match. Showing its latest balls.");
+      if (ui.current() && ui.current().match.id === rec.match.id) ui.render();
+      setBadge(rec, "saved");
+      return null;
+    }
+    rec.synced = ev.slice(0, srv.events.length).map((e) => JSON.stringify(e));
+    S.save(Object.assign(S.get(rec.match.id) || rec, { synced: rec.synced, syncVersion: rec.syncVersion }));
+    ui.changed(rec);
+    return null;
+  }
+
+  // For a database without migration 0017: the balls and the match are saved one request at a time.
+  async function syncOld(rec, ev) {
+    const id = rec.match.cloud.matchId, prev = rec.synced || [];
+    if (prev.length > ev.length) {
+      const { error } = await sb.from("match_events").delete().eq("match_id", id).gte("seq", ev.length);
+      if (error) throw error;
+    }
+    const rows = [];
+    ev.forEach((e, seq) => { if (prev[seq] !== JSON.stringify(e)) rows.push({ match_id: id, seq, event: e }); });
+    if (rows.length) {
+      const { error } = await sb.from("match_events").upsert(rows, { onConflict: "match_id,seq" });
+      if (error) throw error;
+    }
+    const s = E.replay(rec.match, ev), status = s.result ? "done" : "live";
+    const statusChanged = status !== rec.cloudStatus;
+    const resultText = s.result ? s.result.text : null;
+    if (statusChanged || (s.result && resultText !== rec.cloudResult)) {
+      const upd = { status, result_text: resultText, winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null };
+      const { error } = await sb.from("matches").update(upd).eq("id", id);
+      if (error) throw error;
+      rec.cloudStatus = status; rec.cloudResult = resultText;
+      const m = findMatch(id);
+      if (m) Object.assign(m, upd);
+    }
+    // The points table and leaders read this summary. It goes separately so that a database
+    // without the summary column (migration 0002 not run yet) still syncs every ball.
+    if (s.result && (statusChanged || rows.length || prev.length > ev.length)) {
+      const summary = CSA.stats.summarize(rec.match, s, rec.match.cloud.playerIds);
+      const { error } = await sb.from("matches").update({ summary }).eq("id", id);
+      if (error) console.warn("Match summary not saved:", error.message);
+      const m = findMatch(id);
+      if (m && !error) m.summary = summary;
+    }
+    return s;
   }
 
   function syncPending() {

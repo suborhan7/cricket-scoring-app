@@ -55,11 +55,12 @@
 
   // ---------- Scorer side: live score and follower alerts ----------
 
-  // Called after each successful sync of a tournament match.
-  async function afterSync(rec, s) {
+  // Called after each successful sync of a tournament match. liveSaved: the sync already saved
+  // the live score along with the balls (migration 0017).
+  async function afterSync(rec, s, liveSaved) {
     if (!L.user || !rec.match.cloud || rec.readOnly) return;
     const id = rec.match.cloud.matchId;
-    if (!rec.noLive) {
+    if (!rec.noLive && !liveSaved) {
       const { error } = await sb.from("matches").update({ live: C.snapshot(rec.match, s, rec.events) }).eq("id", id);
       // Migration 0014 not run yet: stop trying for this match.
       if (error && /live/.test(error.message || "")) rec.noLive = true;
@@ -77,30 +78,45 @@
   }
 
   // ---------- Fan side: cheap refresh ----------
-  // Every few seconds a fan asks only for the match's status and live score (a few hundred
-  // bytes). The balls are downloaded again only when the live score says something changed.
+  // Every few seconds a fan asks only for the match's status, live score and sync version (a few
+  // hundred bytes). When something changed, only the balls saved since the fan's last look are
+  // downloaded (match_events.v, migration 0017), not the whole match again.
   async function refresh(rec) {
-    const id = rec.match.cloud.matchId;
-    let status = null;
+    const id = rec.match.cloud.matchId, versioned = rec.syncVersion != null;
+    let head = null;
     if (!rec.noLive) {
-      const { data, error } = await sb.from("matches").select("status, live").eq("id", id).single();
+      const { data, error } = await sb.from("matches").select(versioned ? "status, live, events_version, events_count" : "status, live").eq("id", id).single();
       if (error && /live/.test(error.message || "")) rec.noLive = true;
       else if (error) throw error;
       else {
-        if (data.live && data.live.h === rec.liveH && data.status === rec.cloudStatus) return false;
+        const moved = versioned && data.events_version !== rec.syncVersion;
+        if (!moved && data.live && data.live.h === rec.liveH && data.status === rec.cloudStatus) return false;
         rec.liveH = data.live && data.live.h;
-        status = data.status;
+        head = data;
+        if (moved && data.events_count != null) {
+          const got = await sb.from("match_events").select("seq, event").eq("match_id", id).gt("v", rec.syncVersion);
+          if (got.error) throw got.error;
+          const events = rec.events.slice(0, data.events_count);
+          for (const r of got.data) events[r.seq] = r.event;
+          // A gap means a sync landed between the two requests: the full download below sorts it out.
+          if (events.length === data.events_count && Array.from(events).every(Boolean)) return apply(rec, events, data.status, data.events_version);
+        }
       }
     }
     const [m, events] = await Promise.all([
-      status ? { data: { status } } : sb.from("matches").select("status").eq("id", id).single(),
+      head ? { data: head } : sb.from("matches").select("status").eq("id", id).single(),
       sb.from("match_events").select("seq, event").eq("match_id", id).order("seq"),
     ]);
     if (m.error || events.error) throw (m.error || events.error);
-    const changed = events.data.length !== rec.events.length || m.data.status !== rec.cloudStatus
-      || events.data.some((r, i) => JSON.stringify(r.event) !== JSON.stringify(rec.events[i]));
-    rec.events = events.data.map((r) => r.event);
-    rec.cloudStatus = m.data.status;
+    return apply(rec, events.data.map((r) => r.event), m.data.status, versioned ? head && head.events_version : null);
+  }
+
+  function apply(rec, events, status, version) {
+    const changed = events.length !== rec.events.length || status !== rec.cloudStatus
+      || events.some((e, i) => JSON.stringify(e) !== JSON.stringify(rec.events[i]));
+    rec.events = events;
+    rec.cloudStatus = status;
+    if (version != null) rec.syncVersion = version;
     return changed;
   }
 

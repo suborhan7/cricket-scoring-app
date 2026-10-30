@@ -432,5 +432,40 @@ do $$ begin
   if (select live ->> 'inn' from public.matches where id = '40000000-0000-0000-0000-000000000001') is null then raise exception 'fans cannot read the live score'; end if;
 end $$;
 
+-- Safe ball syncing (0017): a sync saves balls, undo and the result together, a phone with an
+-- old version can't overwrite newer balls, fans can fetch just the changed balls, and only
+-- scorers can sync.
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+insert into public.matches (id, tournament_id, team1_id, team2_id, status) values ('40000000-0000-0000-0000-000000000009', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000002', 'live');
+do $$ declare r json; m uuid := '40000000-0000-0000-0000-000000000009'; begin
+  r := public.sync_match(m, null, 3, '[{"seq":0,"event":{"t":"openers"}},{"seq":1,"event":{"t":"ball","runs":1}},{"seq":2,"event":{"t":"ball","runs":2}}]', '{"status":"live","live":{"h":"a"}}');
+  if not (r->>'ok')::boolean or (r->>'version')::int <> 1 then raise exception 'first sync failed: %', r; end if;
+  -- Phone 1 undoes the last ball and fixes ball 1, all in one sync.
+  r := public.sync_match(m, 1, 2, '[{"seq":1,"event":{"t":"ball","runs":4}}]', '{"status":"done","result_text":"SS won","winner_team_id":"20000000-0000-0000-0000-000000000001","summary":{"x":1}}');
+  if (r->>'version')::int <> 2 then raise exception 'second sync failed: %', r; end if;
+  -- Phone 2 still thinks the version is 1: refused, and nothing it sent is saved.
+  r := public.sync_match(m, 1, 5, '[{"seq":2,"event":{"t":"ball","runs":6}},{"seq":3,"event":{"t":"ball","runs":6}},{"seq":4,"event":{"t":"ball","runs":6}}]', '{"status":"live"}');
+  if (r->>'ok')::boolean or (r->>'version')::int <> 2 then raise exception 'stale phone was not refused: %', r; end if;
+  if (select count(*) from public.match_events where match_id = m) <> 2 then raise exception 'stale phone changed the balls'; end if;
+  if (select status || result_text || winner_team_id::text || events_count from public.matches where id = m) <> 'doneSS won20000000-0000-0000-0000-0000000000012' then raise exception 'match columns not saved with the balls'; end if;
+  if (select summary ->> 'x' from public.matches where id = m) <> '1' then raise exception 'summary not saved'; end if;
+  if (select live ->> 'h' from public.matches where id = m) <> 'a' then raise exception 'a key left out was cleared'; end if;
+  -- Only ball 1 changed in version 2, so a fan at version 1 downloads just that one.
+  if (select string_agg(seq::text, ',') from public.match_events where match_id = m and v > 1) <> '1' then raise exception 'changed balls not marked'; end if;
+  if (select count(*) from public.event_edits where match_id = m) <> 2 then raise exception 'synced corrections were not logged'; end if;
+end $$;
+select pg_temp.act('00000000-0000-0000-0000-00000000000c');
+do $$ begin
+  perform public.sync_match('40000000-0000-0000-0000-000000000009', null, 0, '[]', '{}');
+  raise exception 'a stranger synced balls';
+exception when insufficient_privilege then null;
+end $$;
+select pg_temp.act(null);
+do $$ begin
+  perform public.sync_match('40000000-0000-0000-0000-000000000009', null, 0, '[]', '{}');
+  raise exception 'a logged-out fan synced balls';
+exception when insufficient_privilege then null;
+end $$;
+
 reset role;
 \echo 'All security checks passed'
