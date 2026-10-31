@@ -7,6 +7,9 @@ window.CSA = Object.assign(window.CSA || {}, {
     // capacitor.config.json and privacy.html.)
     appName: "CricPulse",
     supabaseUrl: "https://hlditboaogmrkxmwmyqu.supabase.co",
+    // The web address password-reset emails link back to. Add it under Supabase →
+    // Authentication → URL Configuration → Redirect URLs.
+    siteUrl: "https://cricket-scoring-app-two.vercel.app/",
     supabaseKey: "sb_publishable_lrQQ49m6cessvzu1yqaXoA_SBv44JEh",
     // Turn on after enabling the Google provider in Supabase (Authentication → Sign In / Providers).
     googleLogin: false,

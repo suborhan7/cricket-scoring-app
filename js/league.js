@@ -3,6 +3,9 @@
 (function () {
   const ui = CSA.ui, E = CSA.engine, S = CSA.store, cfg = CSA.config || {};
   const esc = ui.esc;
+  // A password-reset email link lands here as #access_token=…&type=recovery (or #error=… when it
+  // has expired). Read it before the Supabase client clears it from the address bar.
+  const landing = location.hash;
   const sb = window.supabase && cfg.supabaseUrl ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
   if (!sb) return;
 
@@ -55,13 +58,35 @@
   function setUser(u) {
     const changed = (u && u.id) !== (L.user && L.user.id);
     L.user = u || null;
+    if (!L.user) L.recovering = false;
     if (!changed) return;
     L.mine = null; L.me = undefined; L.myTeams = null;
     if (L.user) { loadMine(); loadMe(); syncPending(); } else ui.render();
   }
   sb.auth.getSession().then(({ data }) => { L.ready = true; setUser(data.session && data.session.user); openLink(); if (CSA.hub) CSA.hub.runPending(); });
   window.addEventListener("hashchange", openLink);
-  sb.auth.onAuthStateChange((_e, session) => setUser(session && session.user));
+  sb.auth.onAuthStateChange((ev, session) => {
+    setUser(session && session.user);
+    if (ev === "PASSWORD_RECOVERY") startRecovery();
+  });
+  if (/type=recovery/.test(landing)) startRecovery();
+  else if (/error_code=/.test(landing) && /#error=|&error=/.test(landing)) {
+    // An old or already-used reset link: send them back to ask for a new one.
+    history.replaceState(null, "", location.pathname + location.search);
+    setTimeout(() => {
+      Object.assign(form("account", {}), { mode: "forgot", error: "That reset link has expired or was already used. Ask for a new one below." });
+      ui.go("account");
+    }, 300);
+  }
+
+  // Opened from a reset email: they are signed in for now, and must pick a new password.
+  function startRecovery() {
+    if (L.recovering) return;
+    L.recovering = true;
+    if (/^#?$|access_token=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+    L.forms.newpass = { open: true };
+    setTimeout(() => ui.go("account"), 300);
+  }
 
   async function loadMine() {
     L.mineLoading = true; rerender("home", "tours");
@@ -166,14 +191,31 @@
   }
 
   ui.screens.account = () => {
+    if (L.user && L.recovering) {
+      return bar("Set a new password") + `<section class="wrap stack">
+        <p>Choose a new password for <b>${esc(L.user.email)}</b>. You'll use it to sign in from now on, on every phone.</p>
+        ${newPassForm()}</section>`;
+    }
     if (L.user) {
+      const np = form("newpass", {});
       return bar("Account") + `<section class="wrap stack">
         <p>Signed in as <b>${esc(L.user.email)}</b>.</p>
+        ${np.open ? newPassForm() : `<button class="btn" data-act="newpass-open">Change password</button>`}
         <button class="btn" data-act="sign-out">Sign out</button>
         <a class="link-btn" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>
         ${deleteBox()}</section>`;
     }
     const f = form("account", { mode: "in" }), up = f.mode === "up";
+    if (f.mode === "forgot") {
+      return bar("Forgot password", "auth-back") + `<section class="wrap stack">
+      <form class="card stack-s" data-form="forgot">
+        <p class="muted">Enter the email you signed up with. We'll send a link to set a new password.</p>
+        ${field("Email", `<input id="forgot-email" data-f="account.email" type="email" value="${esc(f.email || "")}" autocomplete="email" required>`)}
+        ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Sending…" : "Send reset link"}</button>
+      </form>
+      <button class="link-btn" data-act="auth-mode" data-m="in">Back to sign in</button></section>`;
+    }
     return bar(up ? "Create account" : "Sign in") + `<section class="wrap stack">
       <div class="chips"><button class="chip ${up ? "" : "on"}" data-act="auth-mode" data-m="in">Sign in</button><button class="chip ${up ? "on" : ""}" data-act="auth-mode" data-m="up">Create account</button></div>
       ${googleOk() ? `<button class="btn btn-big btn-google" data-act="auth-google"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>Continue with Google</button>
@@ -184,8 +226,55 @@
         ${field("Password", `<input id="auth-pass" data-f="account.pass" type="password" minlength="6" autocomplete="${up ? "new-password" : "current-password"}" required>`)}
         ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
         <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Please wait…" : up ? "Create account" : "Sign in"}</button>
-      </form></section>`;
+      </form>
+      ${up ? "" : `<button class="link-btn" data-act="auth-mode" data-m="forgot">Forgot password?</button>`}</section>`;
   };
+
+  function newPassForm() {
+    const f = form("newpass", {});
+    return `<form class="card stack-s" data-form="newpass">
+      ${field("New password", `<input id="np-pass" type="password" minlength="6" autocomplete="new-password" required>`, "At least 6 characters.")}
+      ${field("Type it again", `<input id="np-pass2" type="password" minlength="6" autocomplete="new-password" required>`)}
+      ${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+      <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Save new password"}</button>
+      ${L.recovering ? "" : `<button class="link-btn" type="button" data-act="newpass-cancel">Cancel</button>`}
+    </form>`;
+  }
+
+  async function submitNewPass() {
+    const f = form("newpass", {});
+    const a = (document.getElementById("np-pass") || {}).value || "", b = (document.getElementById("np-pass2") || {}).value || "";
+    if (a.length < 6) { f.error = "Use at least 6 characters."; return ui.render(); }
+    if (a !== b) { f.error = "The two passwords don't match."; return ui.render(); }
+    f.busy = true; f.error = ""; ui.render();
+    const { error } = await sb.auth.updateUser({ password: a });
+    f.busy = false;
+    if (error) {
+      f.error = /different from the old/i.test(error.message) ? "That's your old password. Pick a new one." : errText(error);
+      return ui.render();
+    }
+    const wasRecovering = L.recovering;
+    L.recovering = false; L.forms.newpass = {};
+    ui.toast("Password changed");
+    if (wasRecovering) ui.go("home"); else ui.render();
+  }
+
+  async function submitForgot() {
+    const f = form("account", {});
+    f.email = ((document.getElementById("forgot-email") || {}).value || f.email || "").trim();
+    if (!f.email) { f.error = "Enter your email."; return ui.render(); }
+    f.busy = true; f.error = ""; f.note = ""; ui.render();
+    // The link comes back to this web address (in the APK it opens in the phone's browser).
+    const back = /^https?:/.test(location.origin) ? location.origin + location.pathname : cfg.siteUrl;
+    const { error } = await sb.auth.resetPasswordForEmail(f.email, back ? { redirectTo: back } : {});
+    f.busy = false;
+    if (error) {
+      f.error = /rate|seconds|too many/i.test(error.message) ? "Too many tries. Wait a minute, then ask again." : errText(error);
+      return ui.render();
+    }
+    f.note = "If an account uses this email, a reset link is on its way. Check your inbox and spam folder. The link works once.";
+    ui.render();
+  }
 
   function deleteBox() {
     const f = form("delacct", {});
@@ -1168,6 +1257,9 @@
   Object.assign(ui.actions, {
     account() { ui.go("account"); },
     "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; ui.render(); },
+    "auth-back"() { const f = form("account"); if (f.mode === "forgot") { f.mode = "in"; f.error = ""; f.note = ""; ui.render(); } else ui.actions.home(); },
+    "newpass-open"() { L.forms.newpass = { open: true }; ui.render(); },
+    "newpass-cancel"() { L.forms.newpass = {}; ui.render(); },
     async "sign-out"() { await sb.auth.signOut(); ui.toast("Signed out"); ui.go("home"); },
     "tnew-kind"(d) { form("tnew").kind = d.k; ui.render(); },
     "tnew-overs"(d) { const f = form("tnew"); f.custom = false; f.overs = +d.n; f.maxBowler = Math.ceil(f.overs / 5); ui.render(); },
@@ -1305,6 +1397,8 @@
   });
   document.addEventListener("submit", (ev) => {
     if (ev.target.dataset.form === "auth") { ev.preventDefault(); submitAuth(); }
+    if (ev.target.dataset.form === "forgot") { ev.preventDefault(); submitForgot(); }
+    if (ev.target.dataset.form === "newpass") { ev.preventDefault(); submitNewPass(); }
   });
 
   // Shared with squad.js (team and player pages).
