@@ -354,6 +354,15 @@ button { cursor: pointer; }
 .install img { width: 44px; height: 44px; border-radius: 10px; }
 .install span { display: flex; flex-direction: column; gap: 2px; }
 .install small { opacity: 0.75; }
+.install > span:nth-child(2) { flex: 1; }
+.install-go { flex: none; padding: 7px 14px; border-radius: 999px; background: var(--turf); color: var(--on-turf); font-weight: 700; font-size: 14px; }
+.install-wrap { position: relative; }
+.install-wrap .install { padding-right: 12px; }
+.install-x { position: absolute; top: -8px; right: -6px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1; cursor: pointer; }
+.install-help { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.install-help li { display: flex; gap: 10px; align-items: flex-start; }
+.ih-n { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--turf-soft); color: var(--turf); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.ih-ico { display: inline-block; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px; }
 
 /* Google sign-in */
 .btn-google { display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }

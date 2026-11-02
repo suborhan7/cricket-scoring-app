@@ -34,12 +34,12 @@
     return `<header class="bar topbar"><h1>${title}</h1><span class="row-end">${right || ""}</span></header>`;
   }
   // ---------- Day / night ----------
-  // "light" or "dark" when the user picked one; otherwise the phone's setting decides.
+  // Night is the default; "light" when the user picked Day, "auto" to follow the phone.
   const THEME = "csa.theme";
-  const themePick = () => { try { return localStorage.getItem(THEME) || "auto"; } catch (e) { return "auto"; } };
+  const themePick = () => { let p = null; try { p = localStorage.getItem(THEME); } catch (e) {} return p === "light" || p === "auto" ? p : "dark"; };
   const isDark = () => { const p = themePick(); return p === "dark" || (p === "auto" && matchMedia("(prefers-color-scheme: dark)").matches); };
   function setTheme(p) {
-    try { p === "auto" ? localStorage.removeItem(THEME) : localStorage.setItem(THEME, p); } catch (e) {}
+    try { localStorage.setItem(THEME, p); } catch (e) {}
     if (p === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = p;
     paintThemeColor();
     ui.render();
@@ -53,7 +53,7 @@
   const themeBtn = () => `<button class="icon-btn theme-btn" data-act="theme-toggle" aria-label="${isDark() ? "Switch to day mode" : "Switch to night mode"}">${svg(isDark() ? ICON.sun : ICON.moon, 22)}</button>`;
   function themeChips() {
     const p = themePick(), chip = (v, l) => `<button class="chip ${p === v ? "on" : ""}" data-act="theme-set" data-v="${v}">${l}</button>`;
-    return `<h2 class="eyebrow">Appearance</h2><div class="chips">${chip("light", "Day")}${chip("dark", "Night")}${chip("auto", "Same as phone")}</div>`;
+    return `<h2 class="eyebrow">Appearance</h2><div class="chips">${chip("dark", "Night")}${chip("light", "Day")}${chip("auto", "Same as phone")}</div>`;
   }
 
   function homeTop() {
@@ -290,7 +290,7 @@
   }
 
   function accountHtml() {
-    return themeChips() + `<h2 class="eyebrow">Account</h2>
+    return themeChips() + ui.installBanner(true) + `<h2 class="eyebrow">Account</h2>
       <div class="card stack-s"><p class="muted">Signed in as <b>${esc(L.user.email)}</b></p>
         <div class="row-2"><button class="btn" data-act="sign-out">Sign out</button><a class="btn link-as-btn" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></div>
         ${lg.deleteBox()}</div>`;

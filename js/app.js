@@ -73,10 +73,51 @@
 
   // ---------- Home ----------
 
-  // Browsers that support it offer "Install app"; the Android app shell never shows it.
+  // "Install app": Chrome/Edge hand us a prompt; iPhone and other browsers get step-by-step help.
+  // Hidden once the app is installed (opened from the home screen, the Android app shell, or right after installing).
+  const APK_URL = "https://github.com/suborhan7/cricket-scoring-app/releases/download/android-latest/cricpulse.apk";
+  const INSTALLED = "csa.installed", HIDE = "csa.installHide";
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} };
+  const ua = navigator.userAgent || "";
+  const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isAndroid = /android/i.test(ua);
+  const runningAsApp = () => (window.matchMedia && (matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: fullscreen)").matches))
+    || navigator.standalone === true || !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   let installPrompt = null;
-  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; if (view.screen === "home") render(); });
-  window.addEventListener("appinstalled", () => { installPrompt = null; render(); });
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); installPrompt = e;
+    lsSet(INSTALLED, null); // the browser only offers this when the app isn't installed (any more)
+    if (view.screen === "home" || view.screen === "profile") render();
+  });
+  window.addEventListener("appinstalled", () => { installPrompt = null; lsSet(INSTALLED, "1"); closeSheet(); render(); });
+  // Can we offer installing here at all?
+  function canInstall() {
+    if (runningAsApp() || lsGet(INSTALLED) === "1") return false;
+    return !!installPrompt || isIOS || isAndroid;
+  }
+  function installHelpSheet() {
+    const step = (n, t) => `<li><span class="ih-n">${n}</span><span>${t}</span></li>`;
+    let body;
+    if (isIOS) {
+      const safari = !/crios|fxios|edgios|fbav|instagram|line\//i.test(ua);
+      body = `<h2>Install ${esc(APP)} on iPhone</h2><ol class="install-help">
+        ${safari ? "" : step("!", "Open this page in <b>Safari</b> first (other browsers on iPhone can't install apps).")}
+        ${step(1, `Tap the <b>Share</b> button <span class="ih-ico" aria-hidden="true">⬆︎</span> at the bottom of Safari.`)}
+        ${step(2, "Scroll down and tap <b>Add to Home Screen</b>.")}
+        ${step(3, `Tap <b>Add</b>. ${esc(APP)} opens full screen from your home screen.`)}</ol>`;
+    } else {
+      body = `<h2>Install ${esc(APP)}</h2>
+        <a class="btn btn-primary btn-big" href="${APK_URL}" rel="noopener">Download the Android app</a>
+        <p class="muted">Or add it from your browser:</p><ol class="install-help">
+        ${step(1, "Open this page in <b>Chrome</b> (not inside Facebook or Messenger).")}
+        ${step(2, `Tap the <b>⋮</b> menu at the top right.`)}
+        ${step(3, "Tap <b>Install app</b> or <b>Add to Home screen</b>.")}</ol>`;
+    }
+    $sheet.innerHTML = `<div class="sheet-scrim" data-act="close-sheet"></div><div class="sheet-panel" role="dialog" aria-modal="true">
+      <button class="icon-btn sheet-x" data-act="close-sheet" aria-label="Close">✕</button><div class="stack-s">${body}</div></div>`;
+    $sheet.hidden = false;
+  }
 
   // Matches scored on this phone (quick matches, and tournament matches this phone scored).
   function localMatches() {
@@ -97,8 +138,10 @@
     return `<div class="stack-s"><h2 class="eyebrow">Matches on this phone</h2><ul class="match-list">${rows}</ul></div>`;
   }
 
-  function installBanner() {
-    return installPrompt ? `<button class="install" data-act="install"><img src="icons/icon-192.png" alt=""><span><b>Install ${esc(APP)}</b><small>Opens full screen from your home screen and scores offline.</small></span></button>` : "";
+  // Home banner (can be closed with ✕); `always` ignores that, for the Profile page.
+  function installBanner(always) {
+    if (!canInstall() || (!always && lsGet(HIDE) === "1")) return "";
+    return `<div class="install-wrap"><button class="install" data-act="install"><img src="icons/icon-192.png" alt=""><span><b>Install ${esc(APP)} app</b><small>Opens full screen from your home screen and scores offline.</small></span><span class="install-go">Install</span></button>${always ? "" : `<button class="install-x" data-act="install-hide" aria-label="Hide">✕</button>`}</div>`;
   }
 
   // Without the online part (league.js) home is just quick matches on this phone.
@@ -577,7 +620,15 @@
   }
 
   const actions = {
-    async install() { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; render(); },
+    async install() {
+      if (!installPrompt) return installHelpSheet();
+      const p = installPrompt; p.prompt();
+      const choice = await p.userChoice.catch(() => null);
+      installPrompt = null;
+      if (choice && choice.outcome === "accepted") lsSet(INSTALLED, "1");
+      render();
+    },
+    "install-hide"() { lsSet(HIDE, "1"); render(); toast("You can still install it from Profile."); },
     // Back from a page goes to the tab it was opened from.
     home() { rec = null; closeSheet(); view = { screen: CSA.ui.lastTab || "home", tab: 0 }; render(); },
     "match-back"() { actions.home(); },
