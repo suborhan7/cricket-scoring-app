@@ -25,7 +25,7 @@ test("wides and no-balls don't count as balls; byes go to extras", () => {
   const inn = s.innings[0];
   assert.equal(inn.runs, 1 + 3 + 5 + 1 + 2);
   assert.equal(inn.legalBalls, 2);
-  assert.deepEqual(inn.extras, { wd: 4, nb: 1, b: 2, lb: 1 });
+  assert.deepEqual(inn.extras, { wd: 4, nb: 1, b: 2, lb: 1, p: 0 });
   assert.equal(inn.batters[0].runs, 4); // the four off the no-ball
   assert.equal(inn.bowlers[0].runs, 1 + 3 + 5); // byes and leg byes aren't charged to the bowler
   assert.equal(inn.overs[0].map((b) => b.label).join(" "), "wd 3wd 4nb 1lb 2b");
@@ -36,7 +36,7 @@ test("byes and leg byes off a no-ball go to extras, not the batter or the bowler
   const s = E.replay(match(), [...start, nbBye(2, "b"), nbBye(1, "lb"), nbBye(4, "b"), ball(1)]);
   const inn = s.innings[0];
   assert.equal(inn.runs, 3 + 2 + 5 + 1);
-  assert.deepEqual(inn.extras, { wd: 0, nb: 3, b: 6, lb: 1 });
+  assert.deepEqual(inn.extras, { wd: 0, nb: 3, b: 6, lb: 1, p: 0 });
   const striker0 = inn.batters.find((b) => b.player === 0), striker1 = inn.batters.find((b) => b.player === 1);
   assert.equal(striker0.runs + striker1.runs, 1); // only the single off the bat
   assert.equal(striker0.fours, 0); // four byes are not a boundary hit
@@ -52,14 +52,14 @@ test("byes and leg byes off a no-ball go to extras, not the batter or the bowler
   assert.equal(inn.striker, 0);
   // Run out on a no-ball while running byes.
   const r = E.replay(match(), [...start, nbBye(1, "b", { kind: "runout", player: 0 })]).innings[0];
-  assert.deepEqual(r.extras, { wd: 0, nb: 1, b: 1, lb: 0 });
+  assert.deepEqual(r.extras, { wd: 0, nb: 1, b: 1, lb: 0, p: 0 });
   assert.equal(r.wickets, 1);
   assert.equal(r.bowlers[0].wickets, 0);
 });
 
 test("runs off a wide are all wides and charged to the bowler", () => {
   const inn = E.replay(match(), [...start, ball(2, "wd"), ball(4, "wd")]).innings[0];
-  assert.deepEqual(inn.extras, { wd: 8, nb: 0, b: 0, lb: 0 });
+  assert.deepEqual(inn.extras, { wd: 8, nb: 0, b: 0, lb: 0, p: 0 });
   assert.equal(inn.bowlers[0].runs, 8);
   assert.equal(inn.batters[0].runs + inn.batters[1].runs, 0);
 });
@@ -182,4 +182,65 @@ test("removing or fixing an old ball replays cleanly", () => {
   assert.equal(s.innings[0].batters[0].runs, 2);
   assert.equal(s.innings[0].batters[0].out.kind, "bowled");
   assert.equal(s.innings[0].batters.find((b) => b.player === 2).runs, 4);
+});
+
+test("bowler change mid-over: the rest of the over goes to the new bowler, no maiden for either", () => {
+  const ev = [...start, ball(0), ball(0), ball(0), { t: "bowler", bowler: 5, mid: true }, ball(0), ball(0), ball(0)];
+  const inn = E.replay(match(), ev).innings[0];
+  const b0 = inn.bowlers.find((b) => b.player === 0), b5 = inn.bowlers.find((b) => b.player === 5);
+  assert.equal(b0.balls, 3);
+  assert.equal(b5.balls, 3);
+  assert.equal(b0.maidens + b5.maidens, 0);
+  assert.equal(inn.lastBowler, 5);
+  // Without mid: true a bowler event mid-over is ignored, as before.
+  const inn2 = E.replay(match(), [...start, ball(0), { t: "bowler", bowler: 5 }, ball(0)]).innings[0];
+  assert.equal(inn2.bowlers.length, 1);
+  // Changing a wrongly picked bowler before any ball isn't a split over.
+  const inn3 = E.replay(match(), [...start, { t: "bowler", bowler: 5, mid: true }, ball(0), ball(0), ball(0), ball(0), ball(0), ball(0)]).innings[0];
+  assert.equal(inn3.bowlers.find((b) => b.player === 5).maidens, 1);
+});
+
+test("retired out, timed out and run out before the ball are wickets that aren't balls", () => {
+  const ev = [...start, ball(1), { t: "dismiss", kind: "runout", player: 0 }, { t: "batter", player: 2 },
+    { t: "dismiss", kind: "retiredout", player: 1 }, { t: "batter", player: 3 }, { t: "dismiss", kind: "timedout", player: 3 }];
+  const s = E.replay(match(), ev), inn = s.innings[0];
+  assert.equal(inn.wickets, 3);
+  assert.equal(inn.legalBalls, 1);
+  assert.equal(inn.bowlers[0].wickets, 0);
+  assert.equal(E.dismissalText(match(), inn, inn.batters.find((b) => b.player === 1).out), "retired out");
+  assert.equal(inn.overs[0].map((b) => b.label).join(" "), "1 W");
+  assert.equal(inn.overs[0][1].early, true);
+  assert.equal(s.next, "batter");
+});
+
+test("obstructing the field and hit the ball twice: wickets without bowler credit", () => {
+  const inn = E.replay(match(), [...start, ball(0, null, { kind: "obstruct", player: 1 }), { t: "batter", player: 2 }, ball(0, "nb", { kind: "hittwice" })]).innings[0];
+  assert.equal(inn.wickets, 2);
+  assert.equal(inn.bowlers[0].wickets, 0);
+  assert.equal(E.FREE_HIT_WICKETS.has("hittwice"), true);
+  assert.equal(E.FREE_HIT_WICKETS.has("bowled"), false);
+});
+
+test("penalty runs: to the batting side now, to the fielding side on their innings", () => {
+  let s = E.replay(match(), [...start, { t: "penalty", to: "bat", runs: 5 }, ball(1)]);
+  assert.equal(s.innings[0].runs, 6);
+  assert.equal(s.innings[0].extras.p, 5);
+  assert.equal(s.innings[0].bowlers[0].runs, 1);
+  // Fielding side in the first innings: kept until they bat.
+  s = E.replay(match({ oversPerSide: 1 }), [...start, { t: "penalty", to: "bowl" }, ball(0), ball(0), ball(0), ball(0), ball(0), ball(0)]);
+  assert.equal(s.current, 1);
+  assert.equal(s.innings[1].runs, 5);
+  assert.equal(s.innings[1].extras.p, 5);
+  // Penalty to the chasing side can win the match.
+  const second = [{ t: "openers", striker: 0, nonStriker: 1, bowler: 0 }];
+  s = E.replay(match({ oversPerSide: 1 }), [...start, ball(4), ball(0), ball(0), ball(0), ball(0), ball(0), ...second, { t: "penalty", to: "bat" }]);
+  assert.ok(s.result);
+  assert.equal(s.result.winner, 1);
+});
+
+test("bowler wide count is balls, wide runs kept separately", () => {
+  const b = E.replay(match(), [...start, ball(4, "wd"), ball(0, "wd")]).innings[0].bowlers[0];
+  assert.equal(b.wd, 2);
+  assert.equal(b.wdRuns, 6);
+  assert.equal(b.runs, 6);
 });

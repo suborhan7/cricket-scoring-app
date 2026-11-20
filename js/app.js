@@ -415,12 +415,33 @@
         <div class="keypad ${bat ? "keypad-6" : "keypad-5"}">${runBtns(bat ? [0, 1, 2, 3, 4, 6] : [0, 1, 2, 3, 4], "extra-run")}</div>`;
     }
     if (sheet.kind === "b" || sheet.kind === "lb") body = `<h2>${sheet.kind === "b" ? "Byes" : "Leg byes"}</h2><div class="keypad keypad-4">${runBtns([1, 2, 3, 4], "extra-run")}</div>`;
-    if (sheet.kind === "more") body = `<h2>More</h2><div class="stack-s">
-        ${inn.striker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.striker}">Retire ${esc(name(inn.batting, inn.striker))} (hurt)</button>` : ""}
-        ${inn.nonStriker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.nonStriker}">Retire ${esc(name(inn.batting, inn.nonStriker))} (hurt)</button>` : ""}
+    if (sheet.kind === "more") {
+      const crease = [inn.striker, inn.nonStriker].filter((p) => p != null);
+      const nm = (p) => esc(name(inn.batting, p));
+      const bt = (act, attrs, label, cls = "btn-ghost") => `<button class="btn ${cls}" data-act="${act}" ${attrs}>${label}</button>`;
+      const fresh = crease.filter((p) => { const b = inn.batters.find((x) => x.player === p); return b && !b.balls; });
+      body = `<h2>More</h2><div class="stack-s">
+        <span class="eyebrow">Batters</span>
+        ${crease.map((p) => bt("retire", `data-p="${p}"`, `Retire ${nm(p)} (hurt)`)).join("")}
+        ${crease.map((p) => bt("dismiss", `data-p="${p}" data-k="retiredout"`, `Retired out: ${nm(p)}`)).join("")}
+        ${inn.nonStriker != null ? bt("dismiss", `data-p="${inn.nonStriker}" data-k="runout"`, `Run out before the ball: ${nm(inn.nonStriker)}`) : ""}
+        ${fresh.map((p) => bt("dismiss", `data-p="${p}" data-k="timedout"`, `Timed out: ${nm(p)}`)).join("")}
+        <span class="eyebrow">Bowling</span>
+        ${inn.bowler != null ? bt("sheet", `data-k="chbowl"`, `Change bowler mid-over (injury)`) : ""}
+        <span class="eyebrow">Penalty runs</span>
+        ${bt("penalty", `data-to="bat"`, `+5 penalty runs to ${esc(t[inn.batting].name)}`)}
+        ${bt("penalty", `data-to="bowl"`, `+5 penalty runs to ${esc(t[inn.bowling].name)}`)}
+        <span class="eyebrow">Match</span>
         <button class="btn" data-act="handover">Hand over scoring to someone else</button>
         ${rec.match.cloud ? "" : `<button class="btn btn-ghost" data-act="backup-link">Send a backup link</button>`}
         <button class="btn btn-danger" data-act="end-innings">End this innings now</button></div>`;
+    }
+    if (sheet.kind === "chbowl") {
+      // The rest of this over goes to another bowler (not the one who bowled the last over).
+      const list = E.availableBowlers(rec.match, s).filter((p) => p !== inn.bowler);
+      body = `<h2>Change bowler</h2><p class="muted">${esc(name(inn.bowling, inn.bowler))} can't finish the over. Who bowls the rest of it?</p>
+        <div class="stack-s">${list.map((p) => `<button class="btn btn-ghost" data-act="mid-bowler" data-p="${p}">${esc(name(inn.bowling, p))}</button>`).join("") || `<p class="muted">No other bowler is allowed.</p>`}</div>`;
+    }
     if (sheet.kind === "out") body = outForm(inn, t);
     if (sheet.kind === "fix") body = fixForm();
     $sheet.innerHTML = `<div class="sheet-scrim" data-act="close-sheet"></div><div class="sheet-panel" role="dialog" aria-modal="true">
@@ -429,21 +450,26 @@
   }
 
   // Which dismissals fit which delivery (e.g. only a run-out on a no-ball).
-  const KINDS_FOR = { legal: ["bowled", "caught", "lbw", "runout", "stumped", "hitwicket"], wd: ["stumped", "runout", "hitwicket"], nb: ["runout"],
-    b: ["runout"], lb: ["runout"], nbb: ["runout"], nblb: ["runout"] };
+  const KINDS_FOR = { legal: ["bowled", "caught", "lbw", "runout", "stumped", "hitwicket", "obstruct", "hittwice"], wd: ["stumped", "runout", "hitwicket", "obstruct"],
+    nb: ["runout", "obstruct", "hittwice"], b: ["runout", "obstruct"], lb: ["runout", "obstruct"], nbb: ["runout", "obstruct"], nblb: ["runout", "obstruct"] };
+  // Out types that can be either batter (the scorer picks who).
+  const EITHER_BATTER = ["runout", "obstruct"];
 
   function outForm(inn, t) {
     const f = sheet;
-    if (!KINDS_FOR[f.delivery].includes(f.wk)) f.wk = KINDS_FOR[f.delivery][0];
+    // On a free hit the batter can only be out the ways possible off a no-ball.
+    const kinds = KINDS_FOR[f.delivery].filter((k) => !inn.freeHit || E.FREE_HIT_WICKETS.has(k));
+    if (!kinds.includes(f.wk)) f.wk = kinds[0];
     const chip = (act, val, cur, label) => `<button class="chip ${val === cur ? "on" : ""}" data-act="${act}" data-v="${val}">${label}</button>`;
     const needsFielder = ["caught", "stumped", "runout"].includes(f.wk);
     const who = f.who == null ? inn.striker : f.who;
     return `<h2>Wicket</h2>
       <div class="stack-s">
         <div class="chips">${chip("o-del", "legal", f.delivery, "Fair ball")}${chip("o-del", "wd", f.delivery, "On a wide")}${chip("o-del", "nb", f.delivery, "On a no ball")}</div>
-        <div class="chips">${KINDS_FOR[f.delivery].map((k) => chip("o-kind", k, f.wk, E.WICKET_KINDS[k])).join("")}</div>
-        ${f.wk === "runout" ? `<span class="eyebrow">Who is out?</span><div class="chips">${chip("o-who", String(inn.striker), String(who), esc(name(inn.batting, inn.striker)))}${chip("o-who", String(inn.nonStriker), String(who), esc(name(inn.batting, inn.nonStriker)))}</div>
-          <span class="eyebrow">Runs completed before the run-out</span><div class="chips">${[0, 1, 2, 3].map((n) => chip("o-runs", String(n), String(f.runs), String(n))).join("")}</div>
+        ${inn.freeHit ? `<p class="muted">Free hit: only run out, obstructing the field or hit the ball twice.</p>` : ""}
+        <div class="chips">${kinds.map((k) => chip("o-kind", k, f.wk, E.WICKET_KINDS[k])).join("")}</div>
+        ${EITHER_BATTER.includes(f.wk) ? `<span class="eyebrow">Who is out?</span><div class="chips">${chip("o-who", String(inn.striker), String(who), esc(name(inn.batting, inn.striker)))}${chip("o-who", String(inn.nonStriker), String(who), esc(name(inn.batting, inn.nonStriker)))}</div>` : ""}
+        ${f.wk === "runout" ? `          <span class="eyebrow">Runs completed before the run-out</span><div class="chips">${[0, 1, 2, 3].map((n) => chip("o-runs", String(n), String(f.runs), String(n))).join("")}</div>
           ${f.delivery !== "wd" && f.runs ? `<span class="eyebrow">Those runs were</span><div class="chips">${chip("o-by", "bat", f.by, "Off the bat")}${chip("o-by", "b", f.by, "Byes")}${chip("o-by", "lb", f.by, "Leg byes")}</div>` : ""}` : ""}
         ${needsFielder ? `<label class="field"><span>${f.wk === "stumped" ? "Keeper" : "Fielder"}</span><select id="o-fielder"><option value="">Not sure</option>${t[inn.bowling].players.map((p, i) => `<option value="${i}" ${String(i) === f.fielder ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>` : ""}
         <button class="btn btn-out btn-big" data-act="confirm-out">Confirm ${esc(E.WICKET_KINDS[f.wk].toLowerCase())}</button>
@@ -558,15 +584,15 @@
     const ru = rules(), t = rec.match.teams;
     const bat = inn.batters.map((b) => `<tr><td><span class="pname">${esc(name(inn.batting, b.player))}</span><small>${esc(E.dismissalText(rec.match, inn, b.out))}</small></td>
       <td><b>${b.runs}</b></td><td>${b.balls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr(b.runs, b.balls)}</td></tr>`).join("");
-    const bowl = inn.bowlers.map((b) => `<tr><td><span class="pname">${esc(name(inn.bowling, b.player))}</span></td><td>${E.oversText(b.balls, ru.ballsPerOver)}</td><td>${b.maidens}</td><td>${b.runs}</td><td><b>${b.wickets}</b></td><td>${econ(b.runs, b.balls, ru.ballsPerOver)}</td></tr>`).join("");
-    const x = inn.extras, ext = x.wd + x.nb + x.b + x.lb;
+    const bowl = inn.bowlers.map((b) => `<tr><td><span class="pname">${esc(name(inn.bowling, b.player))}</span></td><td>${E.oversText(b.balls, ru.ballsPerOver)}</td><td>${b.maidens}</td><td>${b.runs}</td><td><b>${b.wickets}</b></td><td>${b.nb}</td><td>${b.wd}</td><td>${econ(b.runs, b.balls, ru.ballsPerOver)}</td></tr>`).join("");
+    const x = inn.extras, ext = x.wd + x.nb + x.b + x.lb + (x.p || 0);
     const yet = t[inn.batting].players.map((_, i) => i).filter((i) => !inn.batters.some((b) => b.player === i)).map((i) => esc(name(inn.batting, i)));
     const fow = inn.fow.map((f) => `<li><span>${f.wicket}. ${esc(name(inn.batting, f.player))}</span><span><b>${f.runs}</b> <small>(${f.over} ov)</small></span></li>`).join("");
     return `<div class="table-wrap"><table class="tbl"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${bat}</tbody></table></div>
-        <p class="line"><span>Extras</span><span><b>${ext}</b> (wd ${x.wd}, nb ${x.nb}, b ${x.b}, lb ${x.lb})</span></p>
+        <p class="line"><span>Extras</span><span><b>${ext}</b> (b ${x.b}, lb ${x.lb}, wd ${x.wd}, nb ${x.nb}${x.p ? `, p ${x.p}` : ""})</span></p>
         <p class="line line-total"><span>Total</span><span><b>${inn.runs}/${inn.wickets}</b> (${E.oversText(inn.legalBalls, ru.ballsPerOver)} ov) · RR ${econ(inn.runs, inn.legalBalls, ru.ballsPerOver)}</span></p>
         ${yet.length ? `<p class="muted"><b>Yet to bat:</b> ${yet.join(", ")}</p>` : ""}
-        <div class="table-wrap"><table class="tbl"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowl}</tbody></table></div>
+        <div class="table-wrap"><table class="tbl"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>NB</th><th>WD</th><th>Econ</th></tr></thead><tbody>${bowl}</tbody></table></div>
         ${fow ? `<h2 class="eyebrow">Fall of wickets</h2><ol class="fow-list">${fow}</ol>` : ""}`;
   }
 
@@ -675,6 +701,16 @@
     "pick-batter"(d) { push({ t: "batter", player: +d.p }); },
     "pick-bowler"(d) { push({ t: "bowler", bowler: +d.p }); },
     retire(d) { push({ t: "retire", player: +d.p }); },
+    dismiss(d) {
+      const who = name(st().innings[st().current].batting, +d.p);
+      const what = { retiredout: "Retired out", timedout: "Timed out", runout: "Run out before the ball was bowled (not a ball of the over)" }[d.k];
+      if (confirm(`${what}: ${who}? It counts as a wicket.`)) push({ t: "dismiss", kind: d.k, player: +d.p });
+    },
+    "mid-bowler"(d) { push({ t: "bowler", bowler: +d.p, mid: true }); },
+    penalty(d) {
+      const inn = st().innings[st().current], team = rec.match.teams[d.to === "bowl" ? inn.bowling : inn.batting].name;
+      if (confirm(`Give 5 penalty runs to ${team}?`)) push({ t: "penalty", to: d.to, runs: 5 });
+    },
     "end-innings"() { if (confirm("End this innings now? You can undo it.")) push({ t: "end", reason: "Innings ended by scorer" }); },
     openers() {
       const g = (id) => +document.getElementById(id).value;
@@ -729,7 +765,7 @@
       const sel = document.getElementById("o-fielder");
       const fielder = sel && sel.value !== "" ? +sel.value : null;
       const runout = f.wk === "runout";
-      const player = runout ? (f.who == null ? inn.striker : f.who) : inn.striker;
+      const player = EITHER_BATTER.includes(f.wk) ? (f.who == null ? inn.striker : f.who) : inn.striker;
       const runs = runout ? f.runs : 0, by = runout && runs && f.delivery !== "wd" ? f.by : "bat";
       // Run-out runs that were byes or leg byes: on a fair ball the ball becomes byes/leg byes,
       // on a no-ball they ride on the no-ball as extras.
