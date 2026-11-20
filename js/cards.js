@@ -31,7 +31,7 @@
   const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"], ["P", "Team photo"]];
   const CAREER_STYLES = [["S", "Stat sheet"], ["T", "Trading card"], ["F", "Form guide"]];
   // Match summary: both innings, top batters and bowlers, the result in one line.
-  const SUMMARY_STYLES = [["B", "Bands"], ["C", "Columns"], ["S", "Strips"]];
+  const SUMMARY_STYLES = [["B", "Bands"], ["S", "Strips"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
@@ -1512,50 +1512,6 @@
     bowl: x.bowlers.slice(0, n).map((b) => [b.name, `${b.wickets}-${b.runs}`, b.overs]),
   });
 
-  // Columns: the two sides next to each other, each with its batting on white rows and the bowling it faced below.
-  function drawSummaryColumns(ctx, W, H, th, d) {
-    const S = summaryBase(ctx, W, H, d), { story, acc, inns, n, dy, barY } = S;
-    summaryTitle(ctx, W, d, S, true);
-    const top = 250 + dy * 1.4, gutter = 18, cw = (W - 60 - gutter) / 2, bandH = story ? 112 : 96, subH = story ? 52 : 46;
-    const rows = inns.map((x) => sumRows(x, n)), nb = Math.max(1, ...rows.map((r) => r.bat.length)), nw = Math.max(1, ...rows.map((r) => r.bowl.length));
-    const avail = barY - 30 - top, fixed = bandH + 10 + 18 + subH + 10, rh = Math.min(story ? 86 : 64, (avail - fixed) / (nb + nw)), gap = Math.min(8, rh * 0.12);
-    const total = fixed + (nb + nw) * rh, y0 = top + Math.max(0, (avail - total) / 2);
-    inns.forEach((x, k) => {
-      const T = teamTones(x.team, d), other = inns[1 - k], O = other ? teamTones(other.team, d) : T, X = 30 + k * (cw + gutter), r = rows[k];
-      // Team band.
-      ctx.save(); ctx.shadowColor = rgba(T.base, 0.5); ctx.shadowBlur = 28;
-      const g = ctx.createLinearGradient(0, y0, 0, y0 + bandH); g.addColorStop(0, mix(T.base, "#FFFFFF", 0.08)); g.addColorStop(1, mix(T.deep, "#000000", 0.1));
-      ctx.fillStyle = g; roundRect(ctx, X, y0, cw, bandH, 16); ctx.fill(); ctx.restore();
-      ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(X + 16, y0 + bandH - 5, cw - 32, 5);
-      const nm = (x.team.name || "").toUpperCase();
-      ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, cw - 200, story ? 40 : 36, 700, DISPLAY, 20); text(ctx, nm, X + 22, y0 + bandH * 0.47);
-      if (x.overs) { ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 18, 700, BODY); spaced(ctx, `${x.overs} OVERS`, X + 23, y0 + bandH * 0.47 + 32, 2); }
-      ctx.fillStyle = "#FFFFFF"; fit(ctx, x.score, 170, story ? 62 : 56, 700); text(ctx, x.score, X + cw - 22, y0 + bandH / 2 + (story ? 22 : 20), "right");
-      // White rows; the big figure on a block in the side's colour.
-      const list = (items, yy, Tc, top1) => items.forEach(([name, a, b], i) => {
-        const ry = yy + i * rh, h = rh - gap, cy = ry + h / 2, fs = Math.min(30, h * 0.5), bw = story ? 124 : 108, sw = story ? 70 : 60;
-        ctx.fillStyle = "rgba(255,255,255,0.95)"; roundRect(ctx, X, ry, cw, h, 10); ctx.fill();
-        ctx.save(); roundRect(ctx, X, ry, cw, h, 10); ctx.clip();
-        ctx.fillStyle = Tc.base; ctx.fillRect(X + cw - sw - bw, ry, bw, h);
-        ctx.fillStyle = "#E3E6EC"; ctx.fillRect(X + cw - sw, ry, sw, h);
-        ctx.restore();
-        ctx.fillStyle = "#14161C"; fit(ctx, name.toUpperCase(), cw - sw - bw - 36, fs, 500, DISPLAY, 16); text(ctx, name.toUpperCase(), X + 18, cy + fs * 0.36);
-        ctx.fillStyle = contrast("#FFFFFF", Tc.base) >= 3 ? "#FFFFFF" : "#0B0D12"; font(ctx, fs + 4, 700); text(ctx, a, X + cw - sw - bw / 2, cy + (fs + 4) * 0.36, "center");
-        ctx.fillStyle = "#2A2E38"; font(ctx, fs - 6, 600); text(ctx, b, X + cw - sw / 2, cy + (fs - 6) * 0.36, "center");
-      });
-      let yy = y0 + bandH + 10;
-      list(r.bat, yy, T, true);
-      if (!r.bat.length) { ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 22, 600, BODY); text(ctx, "Did not bat", X + 18, yy + rh / 2 + 8); }
-      // The bowling this side faced, under a strip in the bowling side's colour.
-      yy += nb * rh + 18;
-      ctx.fillStyle = mix(O.base, "#000000", 0.15); roundRect(ctx, X, yy, cw, subH, 12); ctx.fill();
-      ctx.fillStyle = "#FFFFFF"; const on = (other ? other.team.name : "Bowling").toUpperCase(); fit(ctx, on, cw - 150, 24, 700, DISPLAY, 14); text(ctx, on, X + 18, yy + subH / 2 + 9);
-      ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 15, 700, BODY); spaced(ctx, "BOWLING", X + cw - 18, yy + subH / 2 + 6, 3, "right");
-      list(r.bowl, yy + subH + 10, O, true);
-    });
-    summaryFoot(ctx, W, H, d, S);
-  }
-
   // Strips: a dark header per innings with the score on a white plate; each player on a slanted strip in their side's
   // colour, the figures on a white block at the end.
   function drawSummaryStrips(ctx, W, H, th, d) {
@@ -2779,7 +2735,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
-    if (kind === "summary") { ({ B: drawSummary, C: drawSummaryColumns, S: drawSummaryStrips })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "summary") { ({ B: drawSummary, S: drawSummaryStrips })[style](ctx, W, H, th, d); return cv; }
     if (kind === "career") { ({ S: drawCareerSheet, T: drawCareerCard, F: drawCareerForm })[style](ctx, W, H, th, d); return cv; }
     if (kind === "champions") { ({ P: drawChampPhoto, T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
     if (kind === "award") { ({ C: drawAwardCrown, G: drawAwardGold, F: drawAwardFrame })[style](ctx, W, H, th, d); return cv; }

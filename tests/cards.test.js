@@ -86,8 +86,8 @@ test("captions for groups, runners-up and tournament awards", () => {
   assert.match(aw, /^Best batter, Winter Cup 2026: Rakib \(Dhaka Tigers\)!\n148.6 strike rate/);
 });
 
-test("match summary card has three looks and a caption with both innings and the result", () => {
-  assert.deepEqual(C.stylesFor("summary"), [["B", "Bands"], ["C", "Columns"], ["S", "Strips"]]);
+test("match summary card has two looks and a caption with both innings and the result", () => {
+  assert.deepEqual(C.stylesFor("summary"), [["B", "Bands"], ["S", "Strips"]]);
   const inn = (team, score, bat, bowl) => ({ team, score, overs: "20", batters: bat.map(([name, runs, balls, notOut]) => ({ name, runs, balls, notOut })), bowlers: bowl.map(([name, wickets, runs]) => ({ name, wickets, runs, overs: "4" })) });
   const cap = C.caption("summary", { tournament: tour, matchLabel: "Match 12", summary: { text: "Dhaka Tigers won by 24 runs", winner: 0, innings: [
     inn(DT, "186/6", [["Rakib", 72, 41, false], ["Jaker", 31, 18, true]], [["Taskin", 3, 24]]),
