@@ -720,6 +720,7 @@
     return `<header class="bar"><button class="icon-btn" data-act="cardview-back" aria-label="Back">←</button><h1>${esc(c.title || "Card")}</h1></header>
       <section class="wrap stack">
         <div class="chips" role="group" aria-label="Look">${C.stylesFor(c.kind).map(look).join("")}</div>
+        ${c.kind === "summary" ? `<div class="chips" role="group" aria-label="Colours">${C.SUMMARY_TONES.map(([v, label]) => `<button class="chip ${(c.data.sumTone || "B") === v ? "on" : ""}" data-act="card-tone" data-v="${v}">${label}</button>`).join("")}</div>` : ""}
         <div class="chips" role="group" aria-label="Size">${chip("post", "Post 4:5")}${chip("story", "Story 9:16")}</div>
         <div class="card-preview ${c.size}">${c.loading ? `<p class="muted">Drawing…</p>` : c.error ? `<p class="error">${esc(c.error)}</p>` : `<img src="${c.preview}" alt="${esc(c.title || "Card")} preview">`}</div>
         ${photoBox(c)}${sponsorBox(c)}
@@ -787,6 +788,7 @@
       if (rec) openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "tour");
     },
     "card-style"(d) { if (V.card.style !== d.v) { V.card.caption = currentCaption(); V.card.style = V.style = d.v; draw(); } },
+    "card-tone"(d) { if ((V.card.data.sumTone || "B") !== d.v) { V.card.caption = currentCaption(); V.card.data.sumTone = d.v; draw(); } },
     "card-size"(d) { if (V.card.size !== d.v) { V.card.caption = currentCaption(); V.card.size = d.v; draw(); } },
     "cardview-back"() {
       V.card.caption = currentCaption();
