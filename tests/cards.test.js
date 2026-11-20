@@ -85,3 +85,14 @@ test("captions for groups, runners-up and tournament awards", () => {
   const aw = C.caption("award", { tournament: tour, player: { name: "Rakib", team: "Dhaka Tigers" }, award: { title: "Best batter", stats: [["148.6", "", "Strike rate"]] } });
   assert.match(aw, /^Best batter, Winter Cup 2026: Rakib \(Dhaka Tigers\)!\n148.6 strike rate/);
 });
+
+test("match summary card has three looks and a caption with both innings and the result", () => {
+  assert.deepEqual(C.stylesFor("summary"), [["B", "Bands"], ["C", "Columns"], ["S", "Strips"]]);
+  const inn = (team, score, bat, bowl) => ({ team, score, overs: "20", batters: bat.map(([name, runs, balls, notOut]) => ({ name, runs, balls, notOut })), bowlers: bowl.map(([name, wickets, runs]) => ({ name, wickets, runs, overs: "4" })) });
+  const cap = C.caption("summary", { tournament: tour, matchLabel: "Match 12", summary: { text: "Dhaka Tigers won by 24 runs", winner: 0, innings: [
+    inn(DT, "186/6", [["Rakib", 72, 41, false], ["Jaker", 31, 18, true]], [["Taskin", 3, 24]]),
+    inn(CK, "162/9", [["Soumya", 54, 38, false]], [["Tanvir", 3, 24]]),
+  ] } });
+  assert.match(cap, /^Match summary, Match 12\n\nDhaka Tigers 186\/6 \(20 ov\)\nRakib 72 \(41\), Jaker 31\* \(18\)\nChattogram Kings bowling: Taskin 3\/24\n\nChattogram Kings 162\/9/);
+  assert.match(cap, /Dhaka Tigers won by 24 runs\n\n#WC26 #DTvCK #cricket$/);
+});

@@ -191,6 +191,27 @@
     return { kind: "result", data: d, title: "Result card" };
   }
 
+  // Match summary: each innings with its top four batters and the other side's top four bowlers, and the result.
+  async function summaryCard(rec) {
+    const ctx = matchContext(rec), match = rec.match, ru = E.settings(match), s = E.replay(match, rec.events);
+    if (!s.result) return null;
+    const ov = (balls) => E.oversText(balls, ru.ballsPerOver).replace(/\.0$/, "");
+    const innings = s.innings.slice(0, 2).map((inn) => ({
+      team: Object.assign({}, ctx.teams[inn.batting]), side: inn.batting,
+      score: `${inn.runs}/${inn.wickets}`, overs: ov(inn.legalBalls),
+      batters: inn.batters.filter((b) => b.balls || b.runs || (b.out && b.out.kind !== "retired"))
+        .sort((a, b) => b.runs - a.runs || a.balls - b.balls).slice(0, 5)
+        .map((b) => ({ name: match.teams[inn.batting].players[b.player], runs: b.runs, balls: b.balls, notOut: !b.out || b.out.kind === "retired" })),
+      bowlers: inn.bowlers.filter((b) => b.balls)
+        .sort((a, b) => b.wickets - a.wickets || a.runs - b.runs || b.balls - a.balls).slice(0, 5)
+        .map((b) => ({ name: match.teams[inn.bowling].players[b.player], wickets: b.wickets, runs: b.runs, overs: ov(b.balls) })),
+    }));
+    const d = base(ctx, { matchLabel: matchLabel(ctx.m), summary: { innings, text: s.result.text, winner: innings.findIndex((x) => x.side === s.result.winner) } });
+    d.urls.teams = innings.map((x) => x.team.logo);
+    const t = match.teams;
+    return { kind: "summary", data: d, title: `Match summary, ${t[0].short || t[0].name} v ${t[1].short || t[1].name}` };
+  }
+
   function whenText(iso) {
     if (!iso) return "Date to be announced";
     const dt = new Date(iso);
@@ -500,7 +521,7 @@
 
   // ---------- Card lists ----------
 
-  // Cards for one match: the playing XIs, the innings-break target, milestones, player of the match and the result.
+  // Cards for one match: the playing XIs, the innings-break target, milestones, player of the match, the result and the match summary.
   function matchCards(rec) {
     const s = E.replay(rec.match, rec.events), t = rec.match.teams;
     const items = [{ icon: "XI", label: "Playing XIs", sub: `${t[0].name} v ${t[1].name}`, make: () => lineupCard(rec) }];
@@ -510,6 +531,7 @@
       const top = St.mvp(rec.match, s)[0];
       if (top) items.push({ icon: "MVP", label: "Player of the match", sub: `${top.name} · ${top.pts} pts`, make: () => potmCard(rec) });
       items.push({ label: "Result", sub: s.result.text, make: () => resultCard(rec) });
+      items.push({ icon: "▤", label: "Match summary", sub: "Top batters and bowlers of both innings", make: () => summaryCard(rec) });
     }
     return items.concat(performanceItems(rec));
   }

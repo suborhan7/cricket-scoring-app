@@ -2,7 +2,7 @@
 //   A "Broadcast" (TV graphics: skewed bars, white plates), B "Poster" (editorial: giant type,
 //   hairlines, film grain) and C "Modern" (dark glass panels, colour glows, lime accent).
 // Cards: match day fixtures, groups, playing XIs, versus, result, points table, squad, leaders,
-// innings-break target, champions and runners-up, and the player cards: tournament awards in A
+// innings-break target, match summary, champions and runners-up, and the player cards: tournament awards in A
 // and B, milestones in Spotlight and Split, player of the match in Halo, Spotlight and Split. Each card is a feed post
 // (1080 × 1350) or a story (1080 × 1920), with the tournament's logo and a sponsor slot.
 // Missing logos become a crest in the team's colours; a missing photo becomes a silhouette in
@@ -30,10 +30,12 @@
   const AWARD_STYLES = [["C", "Crown"], ["G", "Gold"], ["F", "Frame"]];
   const CHAMP_STYLES = [["T", "Trophy"], ["K", "Captain"], ["B", "Banner"], ["P", "Team photo"]];
   const CAREER_STYLES = [["S", "Stat sheet"], ["T", "Trading card"], ["F", "Form guide"]];
+  // Match summary: both innings, top batters and bowlers, the result in one line.
+  const SUMMARY_STYLES = [["B", "Bands"], ["C", "Columns"], ["S", "Strips"]];
   // Any player's performance in a match: batting and bowling take the milestone looks, all-round the POTM looks.
   const PERF = new Set(["batperf", "bowlperf"]);
   const stylesFor = (kind) => kind === "milestone" || PERF.has(kind) ? MILESTONE_STYLES : kind === "potm" || kind === "allround" ? POTM_STYLES
-    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : kind === "champions" ? CHAMP_STYLES : kind === "career" ? CAREER_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
+    : kind === "result" ? RESULT_STYLES : kind === "schedule" ? SCHEDULE_STYLES : kind === "groups" ? GROUP_STYLES : kind === "lineup" ? LINEUP_STYLES : kind === "squad" ? SQUAD_STYLES : kind === "versus" ? VERSUS_STYLES : kind === "table" ? TABLE_STYLES : kind === "leaders" ? LEADER_STYLES : kind === "award" ? AWARD_STYLES : kind === "champions" ? CHAMP_STYLES : kind === "career" ? CAREER_STYLES : kind === "summary" ? SUMMARY_STYLES : STYLES.filter(([k]) => !(HERO.has(kind) && k === "C"));
 
   // ---------- Colour helpers ----------
 
@@ -1398,6 +1400,212 @@
     grain(ctx, W, H, 0.05);
   }
 
+  // ---------- Match summary: each innings as a team band, its top batters and the other side's top bowlers ----------
+
+  // Two team bands on the tournament background, each with its batters on the left and the bowlers on the right,
+  // and the result in one line at the foot.
+  // Shared by the three summary looks: the background with each side's glow, the title, and the foot.
+  function summaryBase(ctx, W, H, d) {
+    const sm = d.summary, story = H > 1500, { P, acc, BG } = xiBackground(ctx, W, H, d);
+    const inns = sm.innings.slice(0, 2), n = Math.max(1, Math.min(story ? 5 : 4, Math.max(...inns.map((x) => Math.max(x.batters.length, x.bowlers.length)), 1)));
+    inns.forEach((x, k) => {
+      const T = teamTones(x.team, d), cy = k ? H * 0.72 : H * 0.32, cx = k ? W : 0;
+      const g = ctx.createRadialGradient(cx, cy, 40, cx, cy, 760); g.addColorStop(0, rgba(T.base, 0.5)); g.addColorStop(1, rgba(T.base, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    });
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.035)"; ctx.lineWidth = 2; for (let i = -H; i < W; i += 34) { ctx.beginPath(); ctx.moveTo(i, H); ctx.lineTo(i + H * 0.5, 0); ctx.stroke(); } ctx.restore();
+    const dy = story ? 90 : 0, sp = (d.sponsors || []).length && !(d.sponsor && d.sponsor.show === false) ? 70 : 0;
+    const barH = 84, barY = H - 60 - sp - barH - (story ? 70 : 0);
+    return { sm, story, P, acc, BG, inns, n, dy, sp, barH, barY };
+  }
+  // The title block; `side` leaves room for the team logos either side of it.
+  function summaryTitle(ctx, W, d, S, side) {
+    const { P, acc, inns, dy } = S, tw = side ? W - 420 : W - 140;
+    if (!side) tournamentMark(ctx, d, W / 2 - 34, 30 + dy, 68);
+    else inns.forEach((x, k) => {
+      const T = teamTones(x.team, d), cx = k ? W - 120 : 120, cy = 150 + dy;
+      ctx.beginPath(); ctx.arc(cx, cy, 82, 0, Math.PI * 2); ctx.fillStyle = mix(T.deep, "#000000", 0.25); ctx.fill(); ctx.strokeStyle = T.hi === T.tp.base ? T.base : T.hi; ctx.lineWidth = 6; ctx.stroke();
+      logo(ctx, d.images.teams[k], x.team, cx, cy, 120);
+    });
+    ctx.fillStyle = acc; fit(ctx, d.tournament.name.toUpperCase(), tw - 60, 22, 600); spaced(ctx, d.tournament.name.toUpperCase(), W / 2, (side ? 92 : 130) + dy, side ? 6 : 8, "center");
+    const ty = (side ? 176 : 214) + dy;
+    ctx.save(); ctx.translate(W / 2, ty); ctx.transform(1, 0, -0.16, 1, 0, 0); fit(ctx, "MATCH SUMMARY", tw, 88, 700); ctx.textAlign = "center";
+    ctx.fillStyle = mix(P.deep, "#000000", 0.45); ctx.fillText("MATCH SUMMARY", 5, 6);
+    const tg = ctx.createLinearGradient(0, -76, 0, 0); tg.addColorStop(0, "#FFFFFF"); tg.addColorStop(1, mix("#FFFFFF", acc, 0.35)); ctx.fillStyle = tg; ctx.fillText("MATCH SUMMARY", 0, 0); ctx.restore();
+    const sub = [inns.map((x) => x.team.short || x.team.name).join(" v "), d.matchLabel].filter(Boolean).join("  ·  ").toUpperCase();
+    ctx.fillStyle = "rgba(255,255,255,0.78)"; fit(ctx, sub, tw - 40, 22, 600, BODY); spaced(ctx, sub, W / 2 + 3, ty + 44, side ? 4 : 5, "center");
+  }
+  // The result in one line on an accent bar, with the winners' logo; sponsors and the app below.
+  function summaryFoot(ctx, W, H, d, S) {
+    const { sm, story, acc, BG, inns, sp, barH, barY } = S;
+    const wi = sm.winner, line = (sm.text || "").toUpperCase(), BX = 30, BW = W - 60;
+    ctx.save(); ctx.shadowColor = rgba(acc, 0.45); ctx.shadowBlur = 30;
+    const rg = ctx.createLinearGradient(BX, 0, BX + BW, 0); rg.addColorStop(0, mix(acc, "#FFFFFF", 0.12)); rg.addColorStop(1, acc);
+    ctx.fillStyle = rg; roundRect(ctx, BX, barY, BW, barH, barH / 2); ctx.fill(); ctx.restore();
+    const ink = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF";
+    let tx = BX + BW / 2, tw = BW - 80;
+    if (wi != null && wi >= 0) {
+      const lr = barH / 2 - 8; ctx.beginPath(); ctx.arc(BX + 8 + lr, barY + barH / 2, lr, 0, Math.PI * 2); ctx.fillStyle = mix(BG, "#000000", 0.2); ctx.fill();
+      logo(ctx, d.images.teams[wi], inns[wi] && inns[wi].team, BX + 8 + lr, barY + barH / 2, lr * 1.5);
+      tx = BX + BW / 2 + lr; tw = BW - 2 * lr - 90;
+    }
+    ctx.fillStyle = ink; fit(ctx, line, tw, 40, 700, DISPLAY, 20); text(ctx, line, tx, barY + barH / 2 + 14, "center");
+    if (sp) sponsorRow(ctx, d, 50, H - 86 - (story ? 50 : 0), "left", "rgba(255,255,255,0.6)");
+    appMark(ctx, W, H - 22 - (story ? 50 : 0));
+    grain(ctx, W, H, 0.05);
+  }
+
+
+  // Bands: each innings as a team band, its batters on the left and the other side's bowlers on the right.
+  function drawSummary(ctx, W, H, th, d) {
+    const S = summaryBase(ctx, W, H, d), { story, acc, inns, n, dy, barY } = S;
+    summaryTitle(ctx, W, d, S, false);
+    const top = 296 + dy, gap = story ? 44 : 26, block = (barY - 28 - top - gap) / 2, bandH = story ? 116 : 100, headH = 34;
+    const rowH = Math.min(story ? 84 : 74, (block - bandH - headH - 18) / n);
+    // Each innings is as tall as its longer list; the two sit centred in the space above the result.
+    const rowsOf = (x) => Math.max(1, Math.min(n, Math.max(x.batters.length, x.bowlers.length)));
+    const hOf = (x) => bandH + 10 + headH + rowH * rowsOf(x) + 8, total = inns.reduce((a, x) => a + hOf(x), 0) + gap * (inns.length - 1);
+    let y = top + Math.max(0, (barY - 28 - top - total) / 2);
+
+    inns.forEach((x, k) => {
+      const T = teamTones(x.team, d), X = 30, BW = W - 60;
+      if (k) y += hOf(inns[k - 1]) + gap;
+      // The band: team colour, a slant on the right end, an accent rule under it.
+      ctx.save(); ctx.shadowColor = rgba(T.base, 0.55); ctx.shadowBlur = 34;
+      const bg = ctx.createLinearGradient(X, 0, X + BW, 0); bg.addColorStop(0, mix(T.base, "#FFFFFF", 0.06)); bg.addColorStop(1, mix(T.deep, "#000000", 0.1));
+      ctx.fillStyle = bg; roundRect(ctx, X, y, BW, bandH, 18); ctx.fill(); ctx.restore();
+      ctx.save(); roundRect(ctx, X, y, BW, bandH, 18); ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.05)"; font(ctx, bandH * 1.5, 700); text(ctx, (x.team.short || "").toUpperCase(), X + BW - 380, y + bandH * 1.12, "right");
+      ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.beginPath(); ctx.moveTo(X + BW - 330, y); ctx.lineTo(X + BW, y); ctx.lineTo(X + BW, y + bandH); ctx.lineTo(X + BW - 370, y + bandH); ctx.fill();
+      ctx.fillStyle = T.hi === T.tp.base ? acc : T.hi; ctx.fillRect(X, y + bandH - 6, BW, 6);
+      ctx.restore();
+      // Logo on a ring at the left end.
+      const lr = bandH * 0.62, lx = X + 22 + lr, ly = y + bandH / 2 - 3;
+      ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fillStyle = mix(T.deep, "#000000", 0.35); ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 4; ctx.stroke();
+      logo(ctx, d.images.teams[k], x.team, lx, ly, lr * 1.5);
+      const nx = lx + lr + 24, nm = (x.team.name || "").toUpperCase();
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, BW - (nx - X) - 360, story ? 56 : 50, 700, DISPLAY, 26); text(ctx, nm, nx, y + bandH / 2 + (story ? 18 : 15));
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, x.score, 220, story ? 74 : 66, 700); const sw = ctx.measureText(x.score).width; text(ctx, x.score, X + BW - 30, y + bandH / 2 + (story ? 25 : 22), "right");
+      if (x.overs) { ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, story ? 24 : 21, 700, BODY); spaced(ctx, `${x.overs} OV`, X + BW - 30 - sw - 22, y + bandH / 2 + 10, 2, "right"); }
+
+      // Batters (left) and the other side's bowlers (right) on a glass panel.
+      const py = y + bandH + 10, ph = headH + rowH * rowsOf(x) + 8, cw = (BW - 2) / 2;
+      ctx.fillStyle = "rgba(6,10,20,0.34)"; roundRect(ctx, X, py, BW, ph, 18); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 2; roundRect(ctx, X, py, BW, ph, 18); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.16)"; ctx.fillRect(X + cw, py + 12, 2, ph - 24);
+      const cols = [
+        { x0: X, label: "BATTING", h1: "R", h2: "B", rows: x.batters.slice(0, n).map((b) => [b.name, `${b.runs}${b.notOut ? "*" : ""}`, String(b.balls)]) },
+        { x0: X + cw + 2, label: "BOWLING", h1: "W-R", h2: "OV", rows: x.bowlers.slice(0, n).map((b) => [b.name, `${b.wickets}-${b.runs}`, b.overs]) },
+      ];
+      const fs = story ? 32 : 28;
+      cols.forEach((c, j) => {
+        const f1 = c.x0 + cw - 120, f2 = c.x0 + cw - 30, hy = py + 26;
+        ctx.fillStyle = acc; font(ctx, 15, 700, BODY); spaced(ctx, c.label, c.x0 + 26, hy, 3);
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; spaced(ctx, c.h1, f1, hy, 2, "right"); spaced(ctx, c.h2, f2, hy, 2, "right");
+        c.rows.forEach(([name, a, b], i) => {
+          const ry = py + headH + i * rowH, cy = ry + rowH / 2;
+          if (i % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(c.x0 + 10, ry + 3, cw - 20, rowH - 6); }
+          if (i === 0) { ctx.fillStyle = acc; ctx.fillRect(c.x0 + 10, ry + 3, 5, rowH - 6); }
+          ctx.fillStyle = "#FFFFFF"; fit(ctx, name.toUpperCase(), f1 - (c.x0 + 26) - 74, fs, 500, DISPLAY, 18); text(ctx, name.toUpperCase(), c.x0 + 26, cy + fs * 0.36);
+          ctx.fillStyle = i === 0 ? acc : "#FFFFFF"; font(ctx, fs + 6, 700); text(ctx, a, f1, cy + (fs + 6) * 0.36, "right");
+          ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, fs - 4, 600); text(ctx, b, f2, cy + (fs - 4) * 0.36, "right");
+        });
+        if (!c.rows.length) { ctx.fillStyle = "rgba(255,255,255,0.45)"; font(ctx, 22, 600, BODY); text(ctx, j ? "No bowling" : "Did not bat", c.x0 + 26, py + headH + rowH / 2 + 8); }
+      });
+    });
+
+    summaryFoot(ctx, W, H, d, S);
+  }
+
+  // Rows for one innings: [name, big figure, small figure] for its batters, then for the other side's bowlers.
+  const sumRows = (x, n) => ({
+    bat: x.batters.slice(0, n).map((b) => [b.name, `${b.runs}${b.notOut ? "*" : ""}`, String(b.balls)]),
+    bowl: x.bowlers.slice(0, n).map((b) => [b.name, `${b.wickets}-${b.runs}`, b.overs]),
+  });
+
+  // Columns: the two sides next to each other, each with its batting on white rows and the bowling it faced below.
+  function drawSummaryColumns(ctx, W, H, th, d) {
+    const S = summaryBase(ctx, W, H, d), { story, acc, inns, n, dy, barY } = S;
+    summaryTitle(ctx, W, d, S, true);
+    const top = 250 + dy * 1.4, gutter = 18, cw = (W - 60 - gutter) / 2, bandH = story ? 112 : 96, subH = story ? 52 : 46;
+    const rows = inns.map((x) => sumRows(x, n)), nb = Math.max(1, ...rows.map((r) => r.bat.length)), nw = Math.max(1, ...rows.map((r) => r.bowl.length));
+    const avail = barY - 30 - top, fixed = bandH + 10 + 18 + subH + 10, rh = Math.min(story ? 86 : 64, (avail - fixed) / (nb + nw)), gap = Math.min(8, rh * 0.12);
+    const total = fixed + (nb + nw) * rh, y0 = top + Math.max(0, (avail - total) / 2);
+    inns.forEach((x, k) => {
+      const T = teamTones(x.team, d), other = inns[1 - k], O = other ? teamTones(other.team, d) : T, X = 30 + k * (cw + gutter), r = rows[k];
+      // Team band.
+      ctx.save(); ctx.shadowColor = rgba(T.base, 0.5); ctx.shadowBlur = 28;
+      const g = ctx.createLinearGradient(0, y0, 0, y0 + bandH); g.addColorStop(0, mix(T.base, "#FFFFFF", 0.08)); g.addColorStop(1, mix(T.deep, "#000000", 0.1));
+      ctx.fillStyle = g; roundRect(ctx, X, y0, cw, bandH, 16); ctx.fill(); ctx.restore();
+      ctx.fillStyle = T.hi === T.tp.base ? acc : T.hi; ctx.fillRect(X + 16, y0 + bandH - 5, cw - 32, 5);
+      const nm = (x.team.name || "").toUpperCase();
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, cw - 200, story ? 40 : 36, 700, DISPLAY, 20); text(ctx, nm, X + 22, y0 + bandH * 0.47);
+      if (x.overs) { ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 18, 700, BODY); spaced(ctx, `${x.overs} OVERS`, X + 23, y0 + bandH * 0.47 + 32, 2); }
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, x.score, 170, story ? 62 : 56, 700); text(ctx, x.score, X + cw - 22, y0 + bandH / 2 + (story ? 22 : 20), "right");
+      // White rows; the big figure on a block in the side's colour.
+      const list = (items, yy, Tc, top1) => items.forEach(([name, a, b], i) => {
+        const ry = yy + i * rh, h = rh - gap, cy = ry + h / 2, fs = Math.min(30, h * 0.5), bw = story ? 124 : 108, sw = story ? 70 : 60;
+        ctx.fillStyle = "rgba(255,255,255,0.95)"; roundRect(ctx, X, ry, cw, h, 10); ctx.fill();
+        ctx.save(); roundRect(ctx, X, ry, cw, h, 10); ctx.clip();
+        ctx.fillStyle = i === 0 && top1 ? mix(Tc.base, "#FFFFFF", 0.06) : mix(Tc.deep, Tc.base, 0.55); ctx.fillRect(X + cw - sw - bw, ry, bw, h);
+        ctx.fillStyle = mix(Tc.base, "#FFFFFF", 0.85); ctx.fillRect(X + cw - sw, ry, sw, h);
+        ctx.restore();
+        ctx.fillStyle = "#14161C"; fit(ctx, name.toUpperCase(), cw - sw - bw - 36, fs, 500, DISPLAY, 16); text(ctx, name.toUpperCase(), X + 18, cy + fs * 0.36);
+        ctx.fillStyle = "#FFFFFF"; font(ctx, fs + 4, 700); text(ctx, a, X + cw - sw - bw / 2, cy + (fs + 4) * 0.36, "center");
+        ctx.fillStyle = "#2A2E38"; font(ctx, fs - 6, 600); text(ctx, b, X + cw - sw / 2, cy + (fs - 6) * 0.36, "center");
+      });
+      let yy = y0 + bandH + 10;
+      list(r.bat, yy, T, true);
+      if (!r.bat.length) { ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 22, 600, BODY); text(ctx, "Did not bat", X + 18, yy + rh / 2 + 8); }
+      // The bowling this side faced, under a strip in the bowling side's colour.
+      yy += nb * rh + 18;
+      ctx.fillStyle = mix(O.base, "#000000", 0.15); roundRect(ctx, X, yy, cw, subH, 12); ctx.fill();
+      ctx.fillStyle = "#FFFFFF"; const on = (other ? other.team.name : "Bowling").toUpperCase(); fit(ctx, on, cw - 150, 24, 700, DISPLAY, 14); text(ctx, on, X + 18, yy + subH / 2 + 9);
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; font(ctx, 15, 700, BODY); spaced(ctx, "BOWLING", X + cw - 18, yy + subH / 2 + 6, 3, "right");
+      list(r.bowl, yy + subH + 10, O, true);
+    });
+    summaryFoot(ctx, W, H, d, S);
+  }
+
+  // Strips: a dark header per innings with the score on a white plate; each player on a slanted strip in their side's
+  // colour, the figures on an accent block at the end.
+  function drawSummaryStrips(ctx, W, H, th, d) {
+    const S = summaryBase(ctx, W, H, d), { story, acc, BG, inns, n, dy, barY } = S;
+    summaryTitle(ctx, W, d, S, false);
+    const top = 296 + dy, gap = story ? 40 : 24, headH = story ? 92 : 80, rows = inns.map((x) => sumRows(x, n));
+    const cnt = rows.map((r) => Math.max(1, r.bat.length, r.bowl.length)), avail = barY - 28 - top;
+    const rh = Math.min(story ? 84 : 66, (avail - gap - 2 * (headH + 12)) / (cnt[0] + (cnt[1] || 0)));
+    const total = inns.length * (headH + 12) + gap * (inns.length - 1) + rh * cnt.reduce((a, c) => a + c, 0);
+    let y = top + Math.max(0, (avail - total) / 2);
+    const ink = contrast("#0B0D12", acc) >= 4.5 ? "#0B0D12" : "#FFFFFF";
+    inns.forEach((x, k) => {
+      const T = teamTones(x.team, d), other = inns[1 - k], O = other ? teamTones(other.team, d) : T, X = 30, BW = W - 60, r = rows[k];
+      // Header: logo, name, overs and the score plate.
+      ctx.fillStyle = mix(BG, "#000000", 0.35); skew(ctx, X, y, BW, headH, 18); ctx.fill();
+      ctx.fillStyle = T.hi === T.tp.base ? T.base : T.hi; skew(ctx, X, y, 14 + 18, headH, 18); ctx.fill();
+      logo(ctx, d.images.teams[k], x.team, X + 82, y + headH / 2, headH * 0.78);
+      const nm = (x.team.name || "").toUpperCase(), plW = story ? 250 : 220;
+      ctx.fillStyle = "#FFFFFF"; fit(ctx, nm, BW - plW - 300, story ? 50 : 44, 700, DISPLAY, 22); text(ctx, nm, X + 140, y + headH / 2 + (story ? 18 : 16));
+      ctx.fillStyle = "#FFFFFF"; skew(ctx, X + BW - plW - 10, y + 10, plW, headH - 20, 14); ctx.fill();
+      ctx.fillStyle = "#0B0D12"; fit(ctx, x.score, plW - 50, story ? 58 : 50, 700); text(ctx, x.score, X + BW - 10 - plW / 2, y + headH / 2 + (story ? 20 : 17), "center");
+      if (x.overs) { ctx.fillStyle = "rgba(255,255,255,0.7)"; font(ctx, 17, 700, BODY); spaced(ctx, `OVERS ${x.overs}`, X + BW - plW - 30, y + headH / 2 + 7, 2, "right"); }
+      // Strips: batters left in this side's colour, bowlers right in the bowling side's colour.
+      const cw = (BW - 16) / 2, ry0 = y + headH + 12, fs = Math.min(story ? 32 : 28, rh * 0.46);
+      const strip = (items, X0, Tc) => items.forEach(([name, a, b], i) => {
+        const ry = ry0 + i * rh, h = rh - 8, cy = ry + h / 2, sk = h * 0.22, bw = story ? 190 : 168;
+        const g = ctx.createLinearGradient(X0, 0, X0 + cw, 0); g.addColorStop(0, mix(Tc.base, "#FFFFFF", 0.05)); g.addColorStop(1, mix(Tc.deep, Tc.base, 0.4));
+        ctx.fillStyle = g; skew(ctx, X0, ry, cw, h, sk); ctx.fill();
+        ctx.fillStyle = i === 0 ? mix(acc, "#FFFFFF", 0.1) : mix(acc, "#FFFFFF", 0.35); skew(ctx, X0 + cw - bw, ry, bw, h, sk); ctx.fill();
+        ctx.fillStyle = "#FFFFFF"; fit(ctx, name.toUpperCase(), cw - bw - 40, fs, 600, DISPLAY, 16); text(ctx, name.toUpperCase(), X0 + sk + 14, cy + fs * 0.36);
+        ctx.fillStyle = ink === "#FFFFFF" ? "#FFFFFF" : "#0B0D12"; font(ctx, fs + 6, 700); text(ctx, a, X0 + cw - bw + sk + bw * 0.38, cy + (fs + 6) * 0.36, "center");
+        ctx.fillStyle = ink === "#FFFFFF" ? "rgba(255,255,255,0.8)" : "rgba(11,13,18,0.7)"; font(ctx, fs - 6, 600); text(ctx, b, X0 + cw - sk - 12, cy + (fs - 6) * 0.36, "right");
+      });
+      strip(r.bat, X, T); strip(r.bowl, X + cw + 16, O);
+      if (!r.bat.length) { ctx.fillStyle = "rgba(255,255,255,0.5)"; font(ctx, 22, 600, BODY); text(ctx, "Did not bat", X + 20, ry0 + rh / 2 + 8); }
+      y += headH + 12 + rh * cnt[k] + gap;
+    });
+    summaryFoot(ctx, W, H, d, S);
+  }
+
   const DRAW = {
     schedule: drawSchedule, groups: drawGroups, lineup: drawLineup, versus: drawVersus, result: drawResult, table: drawTable,
     squad: drawSquad, leaders: drawLeaders, target: drawTarget, champions: drawChampions,
@@ -2581,6 +2789,7 @@
     const th = d.colors ? theme(d.colors[0], d.colors[1]) : theme(d.tournament.c1, d.tournament.c2);
     if (kind === "milestone" || PERF.has(kind)) { (style === "P" ? drawSplit : drawSpotlight)(ctx, W, H, th, d); return cv; }
     if (kind === "result") { ({ F: drawFaceoff, L: drawScoreline, R: drawResultHero })[style](ctx, W, H, th, d); return cv; }
+    if (kind === "summary") { ({ B: drawSummary, C: drawSummaryColumns, S: drawSummaryStrips })[style](ctx, W, H, th, d); return cv; }
     if (kind === "career") { ({ S: drawCareerSheet, T: drawCareerCard, F: drawCareerForm })[style](ctx, W, H, th, d); return cv; }
     if (kind === "champions") { ({ P: drawChampPhoto, T: drawChampTrophy, K: drawChampCaptain, B: drawChampBanner })[style](ctx, W, H, th, d); return cv; }
     if (kind === "award") { ({ C: drawAwardCrown, G: drawAwardGold, F: drawAwardFrame })[style](ctx, W, H, th, d); return cv; }
@@ -2625,6 +2834,14 @@
       tags.splice(1, 0, tag(`${a.short}v${b.short}`));
       const perf = [r.topBat && `Top scorer: ${r.topBat.name} ${r.topBat.figures}`, r.topBowl && `Best bowling: ${r.topBowl.name} ${r.topBowl.figures}`].filter(Boolean).join("\n");
       return `${r.text}\n\n${a.name} ${a.score}${a.overs ? ` (${a.overs} ov)` : ""}\n${b.name} ${b.score}${b.overs ? ` (${b.overs} ov)` : ""}${perf ? `\n\n${perf}` : ""}\n\n${tags.join(" ")}`;
+    }
+    if (kind === "summary") {
+      const sm = d.summary, inns = sm.innings;
+      if (inns.length > 1) tags.splice(1, 0, tag(`${inns[0].team.short}v${inns[1].team.short}`));
+      const block = (x) => [`${x.team.name} ${x.score}${x.overs ? ` (${x.overs} ov)` : ""}`,
+        x.batters.length ? x.batters.map((b) => `${b.name} ${b.runs}${b.notOut ? "*" : ""} (${b.balls})`).join(", ") : "",
+        x.bowlers.length ? `${(inns.find((o) => o !== x) || { team: { name: "Bowling" } }).team.name} bowling: ${x.bowlers.map((b) => `${b.name} ${b.wickets}/${b.runs}`).join(", ")}` : ""].filter(Boolean).join("\n");
+      return `Match summary${d.matchLabel ? `, ${d.matchLabel}` : ""}\n\n${inns.map(block).join("\n\n")}\n\n${sm.text}\n\n${tags.join(" ")}`;
     }
     if (kind === "versus") {
       const v = d.versus, [a, b] = v.teams;
