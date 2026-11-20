@@ -1219,6 +1219,9 @@
   const changeLogs = {};
   function describeEvent(e) {
     if (!e || e.t === "void") return "removed";
+    if (e.t === "dismiss") return (E.WICKET_KINDS[e.kind] || e.kind).toLowerCase() + (e.kind === "runout" ? " before the ball" : "");
+    if (e.t === "penalty") return `${e.runs || 5} penalty runs to the ${e.to === "bowl" ? "fielding" : "batting"} side`;
+    if (e.t === "bowler" && e.mid) return "bowler changed mid-over";
     if (e.t !== "ball") return { openers: "openers chosen", bowler: "bowler change", batter: "new batter", swap: "strike swapped", retire: "retired hurt", end: "innings ended" }[e.t] || e.t;
     const r = e.runs || 0, x = { wd: "wide", nb: "no ball", b: "byes", lb: "leg byes" }[e.extra];
     let t = x ? `${x}${r ? ` +${r}` : ""}` : `${r} run${r === 1 ? "" : "s"}`;

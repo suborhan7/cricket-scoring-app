@@ -8,7 +8,8 @@
   const FOUR = ["FOUR", "FOUR, races away to the rope", "FOUR, finds the gap", "FOUR, cracking shot"];
   const SIX = ["SIX", "SIX, into the crowd", "SIX, huge hit", "SIX, clears the rope with ease"];
   const DOT = ["no run", "no run", "dot ball"];
-  const OUT = { bowled: "Bowled!", caught: "Caught!", lbw: "LBW!", stumped: "Stumped!", runout: "Run out!", hitwicket: "Hit wicket!" };
+  const OUT = { bowled: "Bowled!", caught: "Caught!", lbw: "LBW!", stumped: "Stumped!", runout: "Run out!", hitwicket: "Hit wicket!",
+    obstruct: "Obstructing the field!", hittwice: "Hit the ball twice!" };
   const MS = { fifty: "brings up a fifty", hundred: "brings up a HUNDRED", threefor: "takes a three-for", fivefor: "takes a FIVE-FOR" };
   const pick = (list, i) => list[i % list.length];
   const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -26,6 +27,7 @@
     else if (hit === 6) t = pick(SIX, i);
     else if (hit === 0) t = b.wicket ? "" : pick(DOT, i);
     else t = plural(hit, "run");
+    if (b.early) return "OUT! Run out before the ball was bowled";
     if (b.wicket) t = `OUT! ${OUT[b.out.kind] || ""}${t && t !== "no run" ? ` ${t[0].toUpperCase()}${t.slice(1)}` : ""}`.trim();
     return t;
   }
@@ -71,7 +73,7 @@
           const fig = bowl.get(b.bowler) || { balls: 0, runs: 0, wkts: 0, maidens: 0 };
           if (b.legal) fig.balls++;
           fig.runs += charged;
-          if (b.wicket && !["runout", "retired"].includes(b.out.kind)) fig.wkts++;
+          if (b.wicket && E.BOWLER_WICKETS.has(b.out.kind)) fig.wkts++;
           bowl.set(b.bowler, fig);
           overRuns += charged; if (b.wicket) overWkts++;
           crease.set(b.batter, `${b.batRuns} (${b.batBalls})`);

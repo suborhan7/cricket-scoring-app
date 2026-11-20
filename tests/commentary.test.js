@@ -92,3 +92,11 @@ test("byes off a no-ball read as byes and aren't charged to the bowler", () => {
   assert.equal(over.runs, 1);
   assert.match(over.bowler, /1-0-1-0/);
 });
+
+test("run out before the ball reads as such and doesn't take a ball number", () => {
+  const m = match();
+  const s = E.replay(m, [...start, ball(0), { t: "dismiss", kind: "runout", player: 1 }]);
+  const items = C.build(m, s)[0].items.filter((x) => x.k === "ball");
+  assert.equal(items[0].text, "OUT! Run out before the ball was bowled");
+  assert.equal(items[0].n, "0.2");
+});
