@@ -1222,6 +1222,7 @@
     if (e.t !== "ball") return { openers: "openers chosen", bowler: "bowler change", batter: "new batter", swap: "strike swapped", retire: "retired hurt", end: "innings ended" }[e.t] || e.t;
     const r = e.runs || 0, x = { wd: "wide", nb: "no ball", b: "byes", lb: "leg byes" }[e.extra];
     let t = x ? `${x}${r ? ` +${r}` : ""}` : `${r} run${r === 1 ? "" : "s"}`;
+    if (e.extra === "nb" && (e.bye === "b" || e.bye === "lb") && r) t = `no ball + ${r} ${e.bye === "b" ? "bye" : "leg bye"}${r === 1 ? "" : "s"}`;
     if (e.wicket && e.wicket.kind !== "retired") t += `, ${E.WICKET_KINDS[e.wicket.kind].toLowerCase()}`;
     return t;
   }
