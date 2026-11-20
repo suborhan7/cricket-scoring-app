@@ -395,7 +395,7 @@
   // ---------- Bottom sheets ----------
 
   function openSheet(kind) {
-    sheet = { kind, delivery: "legal", wk: "bowled", runs: 0, who: null, fielder: "" };
+    sheet = { kind, delivery: "legal", wk: "bowled", runs: 0, who: null, fielder: "", by: "bat" };
     renderSheet();
   }
   function closeSheet() { sheet = null; $sheet.hidden = true; $sheet.innerHTML = ""; }
@@ -406,7 +406,14 @@
     const runBtns = (list, act) => list.map((n) => `<button class="key key-run" data-act="${act}" data-n="${n}">${n}</button>`).join("");
     let body = "";
     if (sheet.kind === "wd") body = `<h2>Wide</h2><p class="muted">Extra runs they ran (or a boundary) on top of the wide.</p><div class="keypad keypad-5">${runBtns([0, 1, 2, 3, 4], "extra-run")}</div>`;
-    if (sheet.kind === "nb") body = `<h2>No ball</h2><p class="muted">Runs off the bat. The next ball is a free hit.</p><div class="keypad keypad-6">${runBtns([0, 1, 2, 3, 4, 6], "extra-run")}</div>`;
+    if (sheet.kind === "nb") {
+      // Runs on a no-ball are the batter's only when hit; byes and leg byes go to extras.
+      const byChip = (v, label) => `<button class="chip ${sheet.by === v ? "on" : ""}" data-act="nb-by" data-v="${v}">${label}</button>`;
+      const bat = sheet.by === "bat";
+      body = `<h2>No ball</h2><p class="muted">${bat ? "Runs off the bat." : sheet.by === "b" ? "Byes they ran: extras, not the batter's." : "Leg byes they ran: extras, not the batter's."} The next ball is a free hit.</p>
+        <div class="chips">${byChip("bat", "Off the bat")}${byChip("b", "Byes")}${byChip("lb", "Leg byes")}</div>
+        <div class="keypad ${bat ? "keypad-6" : "keypad-5"}">${runBtns(bat ? [0, 1, 2, 3, 4, 6] : [0, 1, 2, 3, 4], "extra-run")}</div>`;
+    }
     if (sheet.kind === "b" || sheet.kind === "lb") body = `<h2>${sheet.kind === "b" ? "Byes" : "Leg byes"}</h2><div class="keypad keypad-4">${runBtns([1, 2, 3, 4], "extra-run")}</div>`;
     if (sheet.kind === "more") body = `<h2>More</h2><div class="stack-s">
         ${inn.striker != null ? `<button class="btn btn-ghost" data-act="retire" data-p="${inn.striker}">Retire ${esc(name(inn.batting, inn.striker))} (hurt)</button>` : ""}
@@ -422,7 +429,8 @@
   }
 
   // Which dismissals fit which delivery (e.g. only a run-out on a no-ball).
-  const KINDS_FOR = { legal: ["bowled", "caught", "lbw", "runout", "stumped", "hitwicket"], wd: ["stumped", "runout", "hitwicket"], nb: ["runout"] };
+  const KINDS_FOR = { legal: ["bowled", "caught", "lbw", "runout", "stumped", "hitwicket"], wd: ["stumped", "runout", "hitwicket"], nb: ["runout"],
+    b: ["runout"], lb: ["runout"], nbb: ["runout"], nblb: ["runout"] };
 
   function outForm(inn, t) {
     const f = sheet;
@@ -435,7 +443,8 @@
         <div class="chips">${chip("o-del", "legal", f.delivery, "Fair ball")}${chip("o-del", "wd", f.delivery, "On a wide")}${chip("o-del", "nb", f.delivery, "On a no ball")}</div>
         <div class="chips">${KINDS_FOR[f.delivery].map((k) => chip("o-kind", k, f.wk, E.WICKET_KINDS[k])).join("")}</div>
         ${f.wk === "runout" ? `<span class="eyebrow">Who is out?</span><div class="chips">${chip("o-who", String(inn.striker), String(who), esc(name(inn.batting, inn.striker)))}${chip("o-who", String(inn.nonStriker), String(who), esc(name(inn.batting, inn.nonStriker)))}</div>
-          <span class="eyebrow">Runs completed before the run-out</span><div class="chips">${[0, 1, 2, 3].map((n) => chip("o-runs", String(n), String(f.runs), String(n))).join("")}</div>` : ""}
+          <span class="eyebrow">Runs completed before the run-out</span><div class="chips">${[0, 1, 2, 3].map((n) => chip("o-runs", String(n), String(f.runs), String(n))).join("")}</div>
+          ${f.delivery !== "wd" && f.runs ? `<span class="eyebrow">Those runs were</span><div class="chips">${chip("o-by", "bat", f.by, "Off the bat")}${chip("o-by", "b", f.by, "Byes")}${chip("o-by", "lb", f.by, "Leg byes")}</div>` : ""}` : ""}
         ${needsFielder ? `<label class="field"><span>${f.wk === "stumped" ? "Keeper" : "Fielder"}</span><select id="o-fielder"><option value="">Not sure</option>${t[inn.bowling].players.map((p, i) => `<option value="${i}" ${String(i) === f.fielder ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>` : ""}
         <button class="btn btn-out btn-big" data-act="confirm-out">Confirm ${esc(E.WICKET_KINDS[f.wk].toLowerCase())}</button>
       </div>`;
@@ -443,13 +452,15 @@
 
   // Fixing a ball scored earlier: change what kind of ball it was and the runs, or remove it.
   // The wicket on a ball stays as it was; to take a wicket away, remove the ball.
-  const FIX_RUNS = { legal: [0, 1, 2, 3, 4, 5, 6], wd: [0, 1, 2, 3, 4], nb: [0, 1, 2, 3, 4, 6], b: [1, 2, 3, 4], lb: [1, 2, 3, 4] };
-  const FIX_LABEL = { legal: "Fair ball", wd: "Wide", nb: "No ball", b: "Byes", lb: "Leg byes" };
+  const FIX_RUNS = { legal: [0, 1, 2, 3, 4, 5, 6], wd: [0, 1, 2, 3, 4], nb: [0, 1, 2, 3, 4, 6], b: [1, 2, 3, 4], lb: [1, 2, 3, 4], nbb: [1, 2, 3, 4], nblb: [1, 2, 3, 4] };
+  const FIX_LABEL = { legal: "Fair ball", wd: "Wide", nb: "No ball", b: "Byes", lb: "Leg byes", nbb: "No ball + byes", nblb: "No ball + leg byes" };
+  // "nbb" and "nblb" are a no-ball whose runs were byes or leg byes (event extra "nb" with bye "b"/"lb").
+  const deliveryOf = (e) => (e.extra === "nb" && (e.bye === "b" || e.bye === "lb") ? "nb" + e.bye : e.extra || "legal");
 
   function openFix(i) {
     const e = rec.events[i];
     if (!e || e.t !== "ball") return;
-    sheet = { kind: "fix", index: i, delivery: e.extra || "legal", runs: e.runs || 0, error: "" };
+    sheet = { kind: "fix", index: i, delivery: deliveryOf(e), runs: e.runs || 0, error: "" };
     renderSheet();
   }
 
@@ -465,7 +476,7 @@
       <p class="muted">Now: <b>${esc(ball ? ball.label : "?")}</b>${w ? ` · ${esc(E.WICKET_KINDS[w.kind])} stays. Remove the ball to take the wicket away.` : ""}</p>
       <div class="stack-s">
         <div class="chips">${kinds.map((k) => chip("fix-del", k, f.delivery, FIX_LABEL[k])).join("")}</div>
-        <span class="eyebrow">${f.delivery === "wd" ? "Extra runs on top of the wide" : f.delivery === "nb" ? "Runs off the bat" : "Runs"}</span>
+        <span class="eyebrow">${f.delivery === "wd" ? "Extra runs on top of the wide" : f.delivery === "nb" ? "Runs off the bat" : f.delivery === "nbb" ? "Byes on top of the no ball" : f.delivery === "nblb" ? "Leg byes on top of the no ball" : "Runs"}</span>
         <div class="chips">${FIX_RUNS[f.delivery].map((n) => chip("fix-runs", String(n), String(f.runs), String(n))).join("")}</div>
         ${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
         <button class="btn btn-primary btn-big" data-act="fix-save">Save change</button>
@@ -655,7 +666,12 @@
     swap() { push({ t: "swap" }); },
     sheet(d) { openSheet(d.k); },
     "close-sheet": closeSheet,
-    "extra-run"(d) { push({ t: "ball", runs: +d.n, extra: sheet.kind }); },
+    "extra-run"(d) {
+      const e = { t: "ball", runs: +d.n, extra: sheet.kind };
+      if (sheet.kind === "nb" && sheet.by !== "bat" && +d.n > 0) e.bye = sheet.by;
+      push(e);
+    },
+    "nb-by"(d) { sheet.by = d.v; renderSheet(); },
     "pick-batter"(d) { push({ t: "batter", player: +d.p }); },
     "pick-bowler"(d) { push({ t: "bowler", bowler: +d.p }); },
     retire(d) { push({ t: "retire", player: +d.p }); },
@@ -689,7 +705,10 @@
       const f = sheet;
       applyFix((ev) => {
         const e = Object.assign({}, ev[f.index], { runs: f.runs });
-        if (f.delivery === "legal") delete e.extra; else e.extra = f.delivery;
+        delete e.bye;
+        if (f.delivery === "legal") delete e.extra;
+        else if (f.delivery === "nbb" || f.delivery === "nblb") { e.extra = "nb"; e.bye = f.delivery.slice(2); }
+        else e.extra = f.delivery;
         ev[f.index] = e;
       });
     },
@@ -704,14 +723,21 @@
     "o-kind"(d) { sheet.wk = d.v; renderSheet(); },
     "o-who"(d) { sheet.who = +d.v; renderSheet(); },
     "o-runs"(d) { sheet.runs = +d.v; renderSheet(); },
+    "o-by"(d) { sheet.by = d.v; renderSheet(); },
     "confirm-out"() {
       const s = st(), inn = s.innings[s.current], f = sheet;
       const sel = document.getElementById("o-fielder");
       const fielder = sel && sel.value !== "" ? +sel.value : null;
       const runout = f.wk === "runout";
       const player = runout ? (f.who == null ? inn.striker : f.who) : inn.striker;
-      const extra = f.delivery === "legal" ? undefined : f.delivery;
-      push({ t: "ball", runs: runout ? f.runs : 0, extra, wicket: { kind: f.wk, player, fielder } });
+      const runs = runout ? f.runs : 0, by = runout && runs && f.delivery !== "wd" ? f.by : "bat";
+      // Run-out runs that were byes or leg byes: on a fair ball the ball becomes byes/leg byes,
+      // on a no-ball they ride on the no-ball as extras.
+      let extra = f.delivery === "legal" ? undefined : f.delivery, bye;
+      if (by !== "bat") { if (extra === "nb") bye = by; else extra = by; }
+      const e = { t: "ball", runs, extra, wicket: { kind: f.wk, player, fielder } };
+      if (bye) e.bye = bye;
+      push(e);
     },
   };
 

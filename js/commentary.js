@@ -18,6 +18,7 @@
     const hit = b.hit || 0;
     let t;
     if (b.extra === "wd") t = b.runs > rules.wideRuns ? `${plural(b.runs, "wide")}` : "wide";
+    else if (b.extra === "nb" && b.bye) t = `no ball, ${plural(b.runs - rules.noBallRuns, b.bye === "b" ? "bye" : "leg bye")}`;
     else if (b.extra === "nb") t = hit === 4 ? "no ball, and FOUR" : hit === 6 ? "no ball, and SIX" : hit ? `no ball, ${plural(hit, "run")}` : "no ball";
     else if (b.extra === "b") t = plural(b.runs, "bye");
     else if (b.extra === "lb") t = plural(b.runs, "leg bye");
@@ -66,7 +67,7 @@
         over.forEach((b) => {
           const num = `${Math.floor(legal / bpo)}.${Math.min(bpo, inOver + 1)}`;
           if (b.legal) { legal++; inOver++; }
-          const charged = b.extra === "b" || b.extra === "lb" ? 0 : b.runs;
+          const charged = b.charged != null ? b.charged : b.extra === "b" || b.extra === "lb" ? 0 : b.runs;
           const fig = bowl.get(b.bowler) || { balls: 0, runs: 0, wkts: 0, maidens: 0 };
           if (b.legal) fig.balls++;
           fig.runs += charged;

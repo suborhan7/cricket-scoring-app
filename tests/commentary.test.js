@@ -81,3 +81,14 @@ test("follower alerts: fresh wickets and milestones, innings break and the resul
   // Old wickets aren't sent again from a late sync.
   assert.deepEqual(C.moments(m, E.replay(m, ev), ev, 3).map((x) => x.key), ["result"]);
 });
+
+test("byes off a no-ball read as byes and aren't charged to the bowler", () => {
+  const m = match();
+  const s = E.replay(m, [...start, { t: "ball", runs: 2, extra: "nb", bye: "b" }, ball(0), ball(0), ball(0), ball(0), ball(0), ball(0)]);
+  const items = C.build(m, s)[0].items;
+  const nb = items.find((x) => x.k === "ball" && x.tag === "nb");
+  assert.equal(nb.text, "no ball, 2 byes");
+  const over = items.find((x) => x.k === "over");
+  assert.equal(over.runs, 1);
+  assert.match(over.bowler, /1-0-1-0/);
+});

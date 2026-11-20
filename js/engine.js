@@ -42,11 +42,14 @@
   // Most wickets an innings can lose: one fewer than the batting side's players, capped at 10.
   function maxWickets(match, team) { return Math.max(1, Math.min(10, match.teams[team].players.length - 1)); }
 
+  // Byes or leg byes run off a no-ball ("b" or "lb"); null when the runs came off the bat.
+  function byeOf(e) { return e.extra === "nb" && (e.bye === "b" || e.bye === "lb") ? e.bye : null; }
+
   function ballLabel(e, total) {
     const r = e.runs || 0;
     let l;
     if (e.extra === "wd") l = total > 1 ? total + "wd" : "wd";
-    else if (e.extra === "nb") l = r ? r + "nb" : "nb";
+    else if (e.extra === "nb") l = byeOf(e) ? (r ? `nb+${r}${byeOf(e)}` : "nb") : r ? r + "nb" : "nb";
     else if (e.extra === "b" || e.extra === "lb") l = r + e.extra;
     else l = String(r);
     if (e.wicket && e.wicket.kind !== "retired") l = l === "0" ? "W" : l + "+W";
@@ -77,7 +80,7 @@
 
   function applyBall(match, s, e, index) {
     const rules = settings(match), inn = s.innings[s.current];
-    const ex = e.extra || null, runs = e.runs || 0;
+    const ex = e.extra || null, runs = e.runs || 0, bye = byeOf(e);
     const legal = ex !== "wd" && ex !== "nb";
     const bat = batterOf(inn, inn.striker), bowl = bowlerOf(inn, inn.bowler);
     const before = { bat: bat.runs, wkts: bowl.wickets };
@@ -87,10 +90,16 @@
       total = rules.wideRuns + runs; charged = total;
       inn.extras.wd += total; bowl.wd += total;
     } else if (ex === "nb") {
-      total = rules.noBallRuns + runs; charged = total;
-      inn.extras.nb += rules.noBallRuns; bowl.nb += 1;
-      bat.runs += runs; bat.balls += 1;
-      if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++;
+      total = rules.noBallRuns + runs;
+      inn.extras.nb += rules.noBallRuns; bowl.nb += 1; bat.balls += 1;
+      if (bye) {
+        // Byes or leg byes off a no-ball: extras, not the batter's, and not charged to the bowler
+        // beyond the no-ball itself (Law 21.6, 23.3).
+        inn.extras[bye] += runs; charged = rules.noBallRuns;
+      } else {
+        charged = total; bat.runs += runs;
+        if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++;
+      }
     } else if (ex === "b" || ex === "lb") {
       inn.extras[ex] += runs; bat.balls += 1; charged = 0;
     } else {
@@ -101,8 +110,8 @@
     inn.runs += total; bowl.runs += charged; inn.overRuns += charged;
     if (legal) { inn.legalBalls++; bowl.balls++; }
     // batter, bat (their score after the ball) and score feed the ball-by-ball commentary.
-    const rec = { label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, index, bowler: inn.bowler,
-      batter: bat.player, hit: ex === "b" || ex === "lb" ? 0 : runs };
+    const rec = { label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, bye, charged, index, bowler: inn.bowler,
+      batter: bat.player, hit: ex === "b" || ex === "lb" || bye ? 0 : runs };
     inn.overs[inn.overs.length - 1].push(rec);
 
     if (ex === "nb") inn.freeHit = rules.freeHit; else if (legal) inn.freeHit = false;

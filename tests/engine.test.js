@@ -31,6 +31,39 @@ test("wides and no-balls don't count as balls; byes go to extras", () => {
   assert.equal(inn.overs[0].map((b) => b.label).join(" "), "wd 3wd 4nb 1lb 2b");
 });
 
+test("byes and leg byes off a no-ball go to extras, not the batter or the bowler", () => {
+  const nbBye = (runs, bye, wicket) => ({ t: "ball", runs, extra: "nb", bye, wicket });
+  const s = E.replay(match(), [...start, nbBye(2, "b"), nbBye(1, "lb"), nbBye(4, "b"), ball(1)]);
+  const inn = s.innings[0];
+  assert.equal(inn.runs, 3 + 2 + 5 + 1);
+  assert.deepEqual(inn.extras, { wd: 0, nb: 3, b: 6, lb: 1 });
+  const striker0 = inn.batters.find((b) => b.player === 0), striker1 = inn.batters.find((b) => b.player === 1);
+  assert.equal(striker0.runs + striker1.runs, 1); // only the single off the bat
+  assert.equal(striker0.fours, 0); // four byes are not a boundary hit
+  assert.equal(striker0.balls + striker1.balls, 4); // the batter still faced each no-ball
+  assert.equal(inn.bowlers[0].runs, 3 + 1); // the three no-balls and the single
+  assert.equal(inn.bowlers[0].nb, 3);
+  assert.equal(inn.legalBalls, 1);
+  assert.equal(inn.freeHit, false);
+  assert.equal(inn.overs[0].map((b) => b.label).join(" "), "nb+2b nb+1lb nb+4b 1");
+  assert.equal(inn.overs[0][0].hit, 0);
+  assert.equal(inn.overs[0][0].charged, 1);
+  // Odd byes still swap the batters: 2b (no swap), 1lb (swap), 4b (no swap), 1 (swap).
+  assert.equal(inn.striker, 0);
+  // Run out on a no-ball while running byes.
+  const r = E.replay(match(), [...start, nbBye(1, "b", { kind: "runout", player: 0 })]).innings[0];
+  assert.deepEqual(r.extras, { wd: 0, nb: 1, b: 1, lb: 0 });
+  assert.equal(r.wickets, 1);
+  assert.equal(r.bowlers[0].wickets, 0);
+});
+
+test("runs off a wide are all wides and charged to the bowler", () => {
+  const inn = E.replay(match(), [...start, ball(2, "wd"), ball(4, "wd")]).innings[0];
+  assert.deepEqual(inn.extras, { wd: 8, nb: 0, b: 0, lb: 0 });
+  assert.equal(inn.bowlers[0].runs, 8);
+  assert.equal(inn.batters[0].runs + inn.batters[1].runs, 0);
+});
+
 test("free hit follows a no-ball", () => {
   let s = E.replay(match(), [...start, ball(0, "nb")]);
   assert.equal(s.innings[0].freeHit, true);
