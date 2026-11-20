@@ -25,8 +25,21 @@
       batters: [], bowlers: [], overs: [[]], fow: [],
       striker: null, nonStriker: null, bowler: null, lastBowler: null,
       overRuns: 0, overSplit: false, freeHit: false, closed: false, closeReason: null,
+      // second: the chasing innings. maxOvers / target: set when overs are cut (rain).
+      // superOver: 1, 2... for super over innings, which sit in s.supers, not s.innings.
+      second: false, maxOvers: null, target: null, maxWkts: null, superOver: 0,
     };
   }
+
+  // The innings list the given innings belongs to: the match itself, or one super over.
+  function phaseOf(s, inn) { return inn.superOver ? s.supers[inn.superOver - 1].innings : s.innings; }
+  function oversOf(match, inn) { return inn.maxOvers != null ? inn.maxOvers : settings(match).oversPerSide; }
+  function ballsOf(match, inn) { return oversOf(match, inn) * settings(match).ballsPerOver; }
+  function wktsOf(match, inn) { return inn.maxWkts != null ? inn.maxWkts : maxWickets(match, inn.batting); }
+  // Runs the chasing side needs: a revised target if one was set, else one more than the first innings.
+  function targetOf(s, inn) { return inn.target != null ? inn.target : phaseOf(s, inn)[0].runs + 1; }
+  // Every innings played, the match's own then any super overs.
+  function allInnings(s) { return s.innings.concat(...(s.supers || []).map((x) => x.innings)); }
 
   function batterOf(inn, p) {
     let b = inn.batters.find((x) => x.player === p);
@@ -60,36 +73,49 @@
   }
 
   function closeInnings(match, s, reason) {
-    const inn = s.innings[s.current];
+    const inn = s.live;
     inn.closed = true; inn.closeReason = reason;
     if (inn.overs.length > 1 && inn.overs[inn.overs.length - 1].length === 0) inn.overs.pop();
-    if (s.current === 0) {
+    if (inn.second) { s.result = resultOf(match, s, inn); return; }
+    const next = newInnings(1 - inn.batting);
+    next.second = true; next.superOver = inn.superOver; next.maxWkts = inn.maxWkts;
+    // A chase gets the same overs as the first innings unless they're cut again.
+    next.maxOvers = inn.maxOvers;
+    if (inn.superOver) phaseOf(s, inn).push(next);
+    else {
       s.current = 1;
-      const next = newInnings(1 - inn.batting);
       // Penalty runs given to the fielding side before they batted are added to their innings (Law 41.17).
       const due = s.penaltyDue[next.batting] || 0;
       if (due) { next.runs += due; next.extras.p += due; s.penaltyDue[next.batting] = 0; }
       s.innings.push(next);
     }
-    else s.result = resultOf(match, s);
+    s.live = next;
   }
 
-  function resultOf(match, s) {
-    const [a, b] = s.innings, rules = settings(match);
-    if (b.runs > a.runs) {
-      const left = maxWickets(match, b.batting) - b.wickets;
-      const balls = rules.oversPerSide * rules.ballsPerOver - b.legalBalls;
-      return { winner: b.batting, text: `${match.teams[b.batting].name} won by ${left} wicket${left === 1 ? "" : "s"}` + (balls > 0 ? ` (${balls} ball${balls === 1 ? "" : "s"} left)` : "") };
+  function resultOf(match, s, b) {
+    const a = phaseOf(s, b)[0], rules = settings(match), target = targetOf(s, b), T = match.teams;
+    const revised = b.target != null ? " (revised target)" : "";
+    if (b.superOver) {
+      // Cricbuzz style: "Match tied (Tigers won the super over)".
+      const w = b.runs >= target ? b.batting : b.runs < target - 1 ? a.batting : null;
+      const ord = b.superOver === 1 ? "" : ["", "", "second ", "third "][b.superOver] || `${b.superOver}th `;
+      if (w == null) return { winner: null, tie: true, text: `Match tied (${ord}super over tied too)` };
+      return { winner: w, superOver: b.superOver, text: `Match tied (${T[w].name} won the ${ord}super over)` };
     }
-    if (a.runs > b.runs) {
-      const by = a.runs - b.runs;
-      return { winner: a.batting, text: `${match.teams[a.batting].name} won by ${by} run${by === 1 ? "" : "s"}` };
+    if (b.runs >= target) {
+      const left = wktsOf(match, b) - b.wickets;
+      const balls = ballsOf(match, b) - b.legalBalls;
+      return { winner: b.batting, text: `${T[b.batting].name} won by ${left} wicket${left === 1 ? "" : "s"}` + (balls > 0 ? ` (${balls} ball${balls === 1 ? "" : "s"} left)` : "") + revised };
     }
-    return { winner: null, text: "Match tied" };
+    if (b.runs < target - 1) {
+      const by = target - 1 - b.runs;
+      return { winner: a.batting, text: `${T[a.batting].name} won by ${by} run${by === 1 ? "" : "s"}` + revised };
+    }
+    return { winner: null, tie: true, text: "Match tied" };
   }
 
   function applyBall(match, s, e, index) {
-    const rules = settings(match), inn = s.innings[s.current];
+    const rules = settings(match), inn = s.live;
     const ex = e.extra || null, runs = e.runs || 0, bye = byeOf(e);
     const legal = ex !== "wd" && ex !== "nb";
     const bat = batterOf(inn, inn.striker), bowl = bowlerOf(inn, inn.bowler);
@@ -108,20 +134,21 @@
         inn.extras[bye] += runs; charged = rules.noBallRuns;
       } else {
         charged = total; bat.runs += runs;
-        if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++;
+        if (!e.ran) { if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++; }
       }
     } else if (ex === "b" || ex === "lb") {
       inn.extras[ex] += runs; bat.balls += 1; charged = 0;
     } else {
       bat.runs += runs; bat.balls += 1;
-      if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++;
+      // e.ran: the runs were run, not a boundary (an all-run four), so no 4s/6s.
+      if (!e.ran) { if (runs === 4) bat.fours++; if (runs === 6) bat.sixes++; }
     }
 
     inn.runs += total; bowl.runs += charged; inn.overRuns += charged;
     if (legal) { inn.legalBalls++; bowl.balls++; }
     // batter, bat (their score after the ball) and score feed the ball-by-ball commentary.
     const rec = { label: ballLabel(e, total), legal, wicket: !!(e.wicket && e.wicket.kind !== "retired"), runs: total, extra: ex, bye, charged, index, bowler: inn.bowler,
-      batter: bat.player, hit: ex === "b" || ex === "lb" || bye ? 0 : runs };
+      batter: bat.player, hit: ex === "b" || ex === "lb" || bye ? 0 : runs, ran: !!e.ran };
     inn.overs[inn.overs.length - 1].push(rec);
 
     if (ex === "nb") inn.freeHit = rules.freeHit; else if (legal) inn.freeHit = false;
@@ -142,6 +169,9 @@
       rec.out = { player: outPlayer, kind: w.kind, runs: outBat.runs, balls: outBat.balls, text: dismissalText(match, inn, outBat.out) };
       if (inn.striker === outPlayer) inn.striker = null;
       else if (inn.nonStriker === outPlayer) inn.nonStriker = null;
+      // The scorer can say which end the new batter comes in at (run outs, Law 38.2).
+      if (w.newEnd === "striker" && inn.striker != null && inn.nonStriker == null) [inn.striker, inn.nonStriker] = [null, inn.striker];
+      else if (w.newEnd === "nonstriker" && inn.nonStriker != null && inn.striker == null) [inn.striker, inn.nonStriker] = [inn.nonStriker, null];
     }
 
     // Milestones for the card alerts: 50 and 100 for batters, 3 and 5 wickets for bowlers.
@@ -163,16 +193,16 @@
   }
 
   function checkClose(match, s) {
-    const rules = settings(match), inn = s.innings[s.current];
-    if (inn.wickets >= maxWickets(match, inn.batting)) closeInnings(match, s, "All out");
-    else if (s.current === 1 && inn.runs > s.innings[0].runs) closeInnings(match, s, "Target reached");
-    else if (inn.legalBalls >= rules.oversPerSide * rules.ballsPerOver) closeInnings(match, s, "Overs complete");
+    const inn = s.live;
+    if (inn.wickets >= wktsOf(match, inn)) closeInnings(match, s, "All out");
+    else if (inn.second && inn.runs >= targetOf(s, inn)) closeInnings(match, s, "Target reached");
+    else if (inn.legalBalls >= ballsOf(match, inn)) closeInnings(match, s, "Overs complete");
   }
 
   // A wicket that isn't off a delivery: retired out, timed out, or the non-striker run out
   // before the ball was bowled (Law 38.3). It doesn't count as a ball.
   function dismissOffBall(match, s, e, index) {
-    const rules = settings(match), inn = s.innings[s.current];
+    const rules = settings(match), inn = s.live;
     const p = e.player;
     if (p !== inn.striker && p !== inn.nonStriker) return;
     const kind = e.kind, out = batterOf(inn, p);
@@ -191,8 +221,18 @@
   }
 
   function apply(match, s, e, index) {
+    if (e.t === "superover") {
+      // After a tie the side that batted second bats first in the super over (ICC playing conditions).
+      if (!s.result || !s.result.tie) return;
+      const last = s.live, n = (s.supers || []).length + 1;
+      const inn = newInnings(last.batting);
+      inn.superOver = n; inn.maxOvers = 1; inn.maxWkts = Math.min(2, maxWickets(match, last.batting));
+      s.supers.push({ innings: [inn] });
+      s.result = null; s.live = inn;
+      return;
+    }
     if (s.result) return;
-    const inn = s.innings[s.current];
+    const inn = s.live;
     // Events that no longer fit (after a ball before them was fixed or removed) are skipped,
     // so a correction never leaves the match in a broken state.
     switch (e.t) {
@@ -219,14 +259,28 @@
       case "dismiss":
         if (["retiredout", "timedout", "runout"].includes(e.kind)) dismissOffBall(match, s, e, index);
         break;
+      case "abandon":
+        // Called off (rain, light...): no result, 1 point each.
+        s.result = { winner: null, noResult: true, text: e.text || "No result" };
+        break;
+      case "overs": {
+        // Overs cut during the match (rain). For the chase a revised target can be given (Law 13, playing conditions).
+        if (inn.superOver || !(e.overs >= 1)) break;
+        inn.maxOvers = e.overs;
+        if (inn.second && e.target >= 1) inn.target = e.target;
+        else if (inn.second && e.target == null) inn.target = null;
+        // Overs cut in the first innings carry into the chase.
+        checkClose(match, s);
+        break;
+      }
       case "penalty": {
         // 5 penalty runs (Law 41). To the batting side: added now. To the fielding side: added to
         // their innings, or kept for it if they haven't batted yet (Law 41.17).
         const runs = e.runs || 5;
         if (e.to === "bowl") {
-          const theirs = s.innings.find((x) => x.batting === inn.bowling);
+          const theirs = phaseOf(s, inn).find((x) => x.batting === inn.bowling);
           if (theirs) { theirs.runs += runs; theirs.extras.p += runs; }
-          else s.penaltyDue[inn.bowling] = (s.penaltyDue[inn.bowling] || 0) + runs;
+          else if (!inn.superOver) s.penaltyDue[inn.bowling] = (s.penaltyDue[inn.bowling] || 0) + runs;
         } else { inn.runs += runs; inn.extras.p += runs; }
         checkClose(match, s);
         break;
@@ -252,7 +306,7 @@
   // What the scorer has to do next.
   function nextStep(s) {
     if (s.result) return "done";
-    const inn = s.innings[s.current];
+    const inn = s.live;
     if (inn.batters.length === 0) return "openers";
     if (inn.striker == null || inn.nonStriker == null) return "batter";
     if (inn.bowler == null) return "bowler";
@@ -260,7 +314,8 @@
   }
 
   function replay(match, events) {
-    const s = { innings: [newInnings(match.battingFirst || 0)], current: 0, result: null, milestones: [], penaltyDue: {} };
+    const s = { innings: [newInnings(match.battingFirst || 0)], current: 0, result: null, milestones: [], penaltyDue: {}, supers: [] };
+    s.live = s.innings[0];
     events.forEach((e, i) => apply(match, s, e, i));
     s.next = nextStep(s);
     return s;
@@ -268,25 +323,34 @@
 
   // Players who can still come in to bat.
   function availableBatters(match, s) {
-    const inn = s.innings[s.current];
+    const inn = s.live;
     const used = new Set(inn.batters.filter((b) => b.out && b.out.kind !== "retired" || b.player === inn.striker || b.player === inn.nonStriker).map((b) => b.player));
     return match.teams[inn.batting].players.map((_, i) => i).filter((i) => !used.has(i));
   }
 
   // Bowlers allowed to bowl the next over: not the last over's bowler, and under the over limit.
+  // With overs cut, the cap per bowler shrinks in proportion (a 20-over game cut to 10 gives 2 each).
+  function maxOversPerBowler(match, inn) {
+    const rules = settings(match);
+    if (inn.superOver) return 1;
+    if (inn.maxOvers == null) return rules.maxOversPerBowler;
+    return Math.max(1, Math.min(rules.maxOversPerBowler, Math.ceil((inn.maxOvers * rules.maxOversPerBowler) / rules.oversPerSide)));
+  }
+
   function availableBowlers(match, s) {
-    const rules = settings(match), inn = s.innings[s.current];
+    const rules = settings(match), inn = s.live, cap = maxOversPerBowler(match, inn);
     return match.teams[inn.bowling].players.map((_, i) => i).filter((i) => {
       if (i === inn.lastBowler) return false;
       const b = inn.bowlers.find((x) => x.player === i);
-      return !b || b.balls < rules.maxOversPerBowler * rules.ballsPerOver;
+      return !b || b.balls < cap * rules.ballsPerOver;
     });
   }
 
   function chase(match, s) {
-    if (s.current !== 1) return null;
-    const rules = settings(match), [a, b] = s.innings;
-    const target = a.runs + 1, ballsLeft = rules.oversPerSide * rules.ballsPerOver - b.legalBalls;
+    const b = s.live;
+    if (!b.second) return null;
+    const rules = settings(match);
+    const target = targetOf(s, b), ballsLeft = ballsOf(match, b) - b.legalBalls;
     return { target, need: Math.max(0, target - b.runs), ballsLeft, rrr: ballsLeft > 0 ? ((target - b.runs) * rules.ballsPerOver) / ballsLeft : 0 };
   }
 
@@ -311,7 +375,7 @@
     return out.kind;
   }
 
-  const api = { DEFAULTS, WICKET_KINDS, BOWLER_WICKETS, FREE_HIT_WICKETS, settings, replay, oversText, maxWickets, availableBatters, availableBowlers, chase, dismissalText };
+  const api = { DEFAULTS, WICKET_KINDS, BOWLER_WICKETS, FREE_HIT_WICKETS, settings, allInnings, oversOf, targetOf, maxOversPerBowler, replay, oversText, maxWickets, availableBatters, availableBowlers, chase, dismissalText };
   root.CSA = Object.assign(root.CSA || {}, { engine: api });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

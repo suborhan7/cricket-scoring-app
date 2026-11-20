@@ -244,3 +244,87 @@ test("bowler wide count is balls, wide runs kept separately", () => {
   assert.equal(b.wdRuns, 6);
   assert.equal(b.runs, 6);
 });
+
+// Plays a full over of the given runs.
+const over6 = (r = 0) => Array.from({ length: 6 }, () => ball(r));
+
+test("no result: abandon ends the match without a winner", () => {
+  const s = E.replay(match(), [...start, ball(1), { t: "abandon", text: "No result" }]);
+  assert.equal(s.next, "done");
+  assert.deepEqual([s.result.winner, s.result.noResult, s.result.text], [null, true, "No result"]);
+});
+
+test("rain: overs cut in the first innings carry to the chase, and a revised target decides it", () => {
+  const m = match({ oversPerSide: 4, maxOversPerBowler: 1 });
+  const bowl = (b) => ({ t: "bowler", bowler: b });
+  let s = E.replay(m, [...start, ...over6(1), bowl(1), { t: "overs", overs: 2 }, ...over6(1)]);
+  assert.equal(s.current, 1); // 2 overs done, innings closed
+  assert.equal(s.innings[0].closeReason, "Overs complete");
+  assert.equal(E.oversOf(m, s.innings[1]), 2);
+  // Chase with a revised target of 10 off 2 overs.
+  const chase = [{ t: "openers", striker: 0, nonStriker: 1, bowler: 0 }, { t: "overs", overs: 2, target: 10 }];
+  s = E.replay(m, [...start, ...over6(1), bowl(1), { t: "overs", overs: 2 }, ...over6(1), ...chase, ball(4), ball(4)]);
+  assert.equal(E.chase(m, s).target, 10);
+  s = E.replay(m, [...start, ...over6(1), bowl(1), { t: "overs", overs: 2 }, ...over6(1), ...chase, ball(4), ball(4), ball(2)]);
+  assert.equal(s.result.winner, 1);
+  assert.match(s.result.text, /won by 10 wickets \(9 balls left\) \(revised target\)/);
+  // Failing the revised target by 2: lost by 2 runs.
+  s = E.replay(m, [...start, ...over6(1), bowl(1), { t: "overs", overs: 2 }, ...over6(1), ...chase, ...over6(1), bowl(1), ball(0), ball(0), ball(0), ball(0), ball(0), ball(1)]);
+  assert.equal(s.result.winner, 0);
+  assert.match(s.result.text, /won by 2 runs \(revised target\)/);
+});
+
+test("cut overs shrink the cap per bowler in proportion", () => {
+  const m = match({ oversPerSide: 20, maxOversPerBowler: 4 });
+  const s = E.replay(m, [...start, { t: "overs", overs: 10 }]);
+  assert.equal(E.maxOversPerBowler(m, s.live), 2);
+});
+
+test("super over after a tie: second side bats first, winner decided, a second super over after another tie", () => {
+  const m = match({ oversPerSide: 1 });
+  const inn2 = [{ t: "openers", striker: 0, nonStriker: 1, bowler: 0 }];
+  const tie = [...start, ...over6(1), ...inn2, ...over6(1)];
+  let s = E.replay(m, tie);
+  assert.equal(s.result.text, "Match tied");
+  assert.equal(s.result.tie, true);
+  s = E.replay(m, [...tie, { t: "superover" }]);
+  assert.equal(s.result, null);
+  assert.equal(s.live.batting, 1); // Lions batted second, they bat first in the super over
+  assert.equal(s.live.superOver, 1);
+  assert.equal(s.next, "openers");
+  const so1 = [{ t: "superover" }, { t: "openers", striker: 2, nonStriker: 3, bowler: 4 }, ball(6), ball(0, null, { kind: "bowled" }), { t: "batter", player: 4 }, ball(0, null, { kind: "bowled" })];
+  s = E.replay(m, [...tie, ...so1]);
+  assert.equal(s.live.batting, 0); // two wickets end the super over innings
+  assert.equal(s.supers[0].innings[0].closeReason, "All out");
+  s = E.replay(m, [...tie, ...so1, { t: "openers", striker: 2, nonStriker: 3, bowler: 4 }, ball(4), ball(4)]);
+  assert.equal(s.result.winner, 0);
+  assert.equal(s.result.text, "Match tied (Tigers won the super over)");
+  // Main innings stay as they were for stats.
+  assert.equal(s.innings.length, 2);
+  assert.equal(E.allInnings(s).length, 4);
+  // Super over tied too: another one.
+  s = E.replay(m, [...tie, ...so1, { t: "openers", striker: 2, nonStriker: 3, bowler: 4 }, ...over6(1)]);
+  assert.equal(s.result.text, "Match tied (super over tied too)");
+  s = E.replay(m, [...tie, ...so1, { t: "openers", striker: 2, nonStriker: 3, bowler: 4 }, ...over6(1), { t: "superover" }]);
+  assert.equal(s.live.superOver, 2);
+  assert.equal(s.live.batting, 0);
+});
+
+test("a 4 that was run isn't a boundary, and the new batter's end can be picked after a run out", () => {
+  const inn = E.replay(match(), [...start, { t: "ball", runs: 4, ran: true }]).innings[0];
+  assert.equal(inn.batters[0].runs, 4);
+  assert.equal(inn.batters[0].fours, 0);
+  // 1 run then the striker (now at the other end) is run out; new batter goes to the striker's end.
+  let s = E.replay(match(), [...start, { t: "ball", runs: 1, wicket: { kind: "runout", player: 1, newEnd: "striker" } }]);
+  assert.equal(s.live.striker, null);
+  assert.equal(s.live.nonStriker, 0);
+  s = E.replay(match(), [...start, { t: "ball", runs: 1, wicket: { kind: "runout", player: 1, newEnd: "nonstriker" } }]);
+  assert.equal(s.live.striker, 0);
+  assert.equal(s.live.nonStriker, null);
+});
+
+test("no-ball worth 2 and wides worth 0 when the match says so", () => {
+  const inn = E.replay(match({ noBallRuns: 2, wideRuns: 0 }), [...start, ball(0, "nb"), ball(0, "wd")]).innings[0];
+  assert.equal(inn.runs, 2);
+  assert.equal(inn.legalBalls, 0);
+});

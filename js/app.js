@@ -59,8 +59,9 @@
     }
     if (after.current !== before.current && !after.result) {
       // A quick match lives only on this phone, so the break is a good moment for a backup.
-      if (!rec.match.cloud) toast(`Innings break. Target ${after.innings[0].runs + 1}. Tap to send a backup link.`, { act: "backup-link" });
-      else toast(`Innings break. Target ${after.innings[0].runs + 1}`);
+      const tg = E.targetOf(after, after.live);
+      if (!rec.match.cloud) toast(`Innings break. Target ${tg}. Tap to send a backup link.`, { act: "backup-link" });
+      else toast(`Innings break. Target ${tg}`);
     }
     closeSheet();
     render();
@@ -158,7 +159,7 @@
   // ---------- Setup ----------
 
   function newSetup() {
-    return { teams: [{ name: "", players: "" }, { name: "", players: "" }], overs: 20, custom: false, maxBowler: 4, maxEdited: false, tossWinner: 0, decision: "bat" };
+    return { teams: [{ name: "", players: "" }, { name: "", players: "" }], overs: 20, custom: false, maxBowler: 4, maxEdited: false, tossWinner: 0, decision: "bat", xr: extrasRules.load() };
   }
 
   function setupView() {
@@ -187,6 +188,7 @@
           <div class="chips"><button class="chip ${f.tossWinner === 0 ? "on" : ""}" data-act="toss" data-i="0">${tn(0)}</button><button class="chip ${f.tossWinner === 1 ? "on" : ""}" data-act="toss" data-i="1">${tn(1)}</button></div>
           <div class="chips"><button class="chip ${f.decision === "bat" ? "on" : ""}" data-act="decision" data-d="bat">Chose to bat</button><button class="chip ${f.decision === "bowl" ? "on" : ""}" data-act="decision" data-d="bowl">Chose to bowl</button></div>
         </fieldset>
+        ${extrasRules.html(f.xr, "xr")}
         <p class="error" id="setup-error" hidden></p>
         <button class="btn btn-primary btn-big" data-act="start">Start match</button>
       </section>`;
@@ -207,8 +209,9 @@
     const match = {
       id: S.newId(), createdAt: Date.now(), teams, battingFirst,
       toss: { winner: f.tossWinner, decision: f.decision },
-      rules: { oversPerSide: f.overs, ballsPerOver: 6, maxOversPerBowler: Math.max(1, f.maxBowler | 0) },
+      rules: Object.assign({ oversPerSide: f.overs, ballsPerOver: 6, maxOversPerBowler: Math.max(1, f.maxBowler | 0) }, f.xr),
     };
+    extrasRules.save(null, f.xr);
     rec = { match, events: [] };
     S.save(rec);
     view = { screen: "score", tab: 0 };
@@ -220,7 +223,7 @@
   // Live card in the familiar scorecard layout: team and innings, the score with overs,
   // CRR on the right, a partnership strip, then the batters and bowler as small tables.
   function scoreboard(s) {
-    const ru = rules(), inn = s.innings[s.current], t = rec.match.teams;
+    const ru = rules(), inn = s.live, t = rec.match.teams;
     const ch = E.chase(rec.match, s);
     const crr = inn.legalBalls ? ((inn.runs * ru.ballsPerOver) / inn.legalBalls).toFixed(2) : "0.00";
     const rate = (k, v) => `<div class="lv-rate"><span>${k}</span><b>${v}</b></div>`;
@@ -230,12 +233,13 @@
     for (const over of inn.overs) for (const b of over) { pr += b.runs; if (b.legal) pb++; if (b.wicket) { pr = 0; pb = 0; } }
     const strip = [
       inn.batters.length ? `<span><em>P'ship</em> ${pr}(${pb})</span>` : "",
-      chasing ? `<span><em>Need</em> ${ch.need} off ${ch.ballsLeft}</span>` : s.current === 1 ? `<span><em>${esc(t[s.innings[0].batting].short)}</em> ${s.innings[0].runs}-${s.innings[0].wickets}</span>` : "",
+      chasing ? `<span><em>Need</em> ${ch.need} off ${ch.ballsLeft}</span>` : s.current === 1 && !inn.superOver ? `<span><em>${esc(t[s.innings[0].batting].short)}</em> ${s.innings[0].runs}-${s.innings[0].wickets}</span>` : "",
+      inn.maxOvers != null && !inn.superOver ? `<span><em>Overs</em> ${inn.maxOvers}${inn.target != null ? ` · target ${inn.target}` : ""}</span>` : "",
       inn.freeHit && !s.result ? `<span class="pill pill-free">FREE HIT</span>` : "",
     ].filter(Boolean).join("");
     return `<div class="scoreboard"><div class="live">
       <div class="lv-head">
-        <div class="lv-score"><div class="lv-team">${esc(t[inn.batting].short)} <small>${s.current === 0 ? "1st" : "2nd"} inn</small></div>
+        <div class="lv-score"><div class="lv-team">${esc(t[inn.batting].short)} <small>${inn.superOver ? "Super over" : s.current === 0 ? "1st inn" : "2nd inn"}</small></div>
           <div class="lv-runs">${inn.runs}-${inn.wickets} <small>(${E.oversText(inn.legalBalls, ru.ballsPerOver)})</small></div></div>
         <div class="lv-rates">${rate("CRR", crr)}${chasing ? rate("RRR", ch.rrr.toFixed(2)) : ""}</div>
       </div>
@@ -245,7 +249,7 @@
   }
 
   function playersBlock(s) {
-    const ru = rules(), inn = s.innings[s.current];
+    const ru = rules(), inn = s.live;
     if (!inn.batters.length) return "";
     const bat = (p, strike) => {
       if (p == null) return `<tr><td class="muted">Waiting for batter</td><td></td><td></td><td></td><td></td><td></td></tr>`;
@@ -271,14 +275,15 @@
   }
 
   function bowlerFig(p) {
-    const s = st(), inn = s.innings[s.current], b = inn.bowlers.find((x) => x.player === p);
+    const s = st(), inn = s.live, b = inn.bowlers.find((x) => x.player === p);
     return b ? `<small>${E.oversText(b.balls, rules().ballsPerOver)}-${b.runs}-${b.wickets}</small>` : "";
   }
 
   function openersView(s) {
-    const inn = s.innings[s.current], t = rec.match.teams;
+    const inn = s.live, t = rec.match.teams;
     const opts = (team, sel) => t[team].players.map((p, i) => `<option value="${i}" ${i === sel ? "selected" : ""}>${esc(p)}</option>`).join("");
-    const banner = s.current === 1 ? `<p class="break">Innings break. ${esc(t[inn.batting].name)} need <b>${s.innings[0].runs + 1}</b> to win.</p>` : "";
+    const banner = inn.superOver ? `<p class="break">Super over${inn.superOver > 1 ? ` ${inn.superOver}` : ""}. ${esc(t[inn.batting].name)} ${inn.second ? `need <b>${E.targetOf(s, inn)}</b> off 6 balls` : "bat first"}, 2 wickets.</p>`
+      : s.current === 1 ? `<p class="break">Innings break. ${esc(t[inn.batting].name)} need <b>${E.targetOf(s, inn)}</b> to win${inn.maxOvers != null ? ` in ${inn.maxOvers} overs` : ""}.</p>` : "";
     return `<div class="pick">${banner}<h2 class="pick-title">Openers and first bowler</h2>
       <label class="field"><span>Striker</span><select id="op-striker">${opts(inn.batting, 0)}</select></label>
       <label class="field"><span>Non-striker</span><select id="op-non">${opts(inn.batting, 1)}</select></label>
@@ -304,7 +309,7 @@
   }
 
   function scoreView() {
-    const s = st(), inn = s.innings[s.current], t = rec.match.teams;
+    const s = st(), inn = s.live, t = rec.match.teams;
     let action = "";
     if (s.next === "openers") action = openersView(s);
     else if (s.next === "batter") {
@@ -315,7 +320,8 @@
       action = pickList(`Over ${Math.floor(inn.legalBalls / rules().ballsPerOver) + 1}: who bowls?`, inn.bowling, ok.length ? ok : t[inn.bowling].players.map((_, i) => i), "pick-bowler");
     } else if (s.next === "ball") action = keypad();
     else action = `<div class="result"><p class="result-text">${esc(s.result.text)}</p>
-      <button class="btn btn-primary btn-big" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="match-back">All matches</button></div>`;
+      ${s.result.tie ? `<button class="btn btn-primary btn-big" data-act="super-over">Play a super over</button>` : ""}
+      <button class="btn ${s.result.tie ? "" : "btn-primary btn-big"}" data-act="card">Full scorecard</button><button class="btn btn-ghost" data-act="match-back">All matches</button></div>`;
 
     // The keypad carries Undo and More itself; picking a player still needs them.
     let tools = s.next === "done" || s.next === "ball" ? "" : `<div class="tools">
@@ -402,7 +408,7 @@
 
   function renderSheet() {
     if (!sheet) return closeSheet();
-    const s = st(), inn = s.innings[s.current], t = rec.match.teams;
+    const s = st(), inn = s.live, t = rec.match.teams;
     const runBtns = (list, act) => list.map((n) => `<button class="key key-run" data-act="${act}" data-n="${n}">${n}</button>`).join("");
     let body = "";
     if (sheet.kind === "wd") body = `<h2>Wide</h2><p class="muted">Extra runs they ran (or a boundary) on top of the wide.</p><div class="keypad keypad-5">${runBtns([0, 1, 2, 3, 4], "extra-run")}</div>`;
@@ -412,15 +418,18 @@
       const bat = sheet.by === "bat";
       body = `<h2>No ball</h2><p class="muted">${bat ? "Runs off the bat." : sheet.by === "b" ? "Byes they ran: extras, not the batter's." : "Leg byes they ran: extras, not the batter's."} The next ball is a free hit.</p>
         <div class="chips">${byChip("bat", "Off the bat")}${byChip("b", "Byes")}${byChip("lb", "Leg byes")}</div>
-        <div class="keypad ${bat ? "keypad-6" : "keypad-5"}">${runBtns(bat ? [0, 1, 2, 3, 4, 6] : [0, 1, 2, 3, 4], "extra-run")}</div>`;
+        <div class="keypad keypad-6">${runBtns(bat ? [0, 1, 2, 3, 4, 6] : [0, 1, 2, 3, 4, 5], "extra-run")}</div>`;
     }
-    if (sheet.kind === "b" || sheet.kind === "lb") body = `<h2>${sheet.kind === "b" ? "Byes" : "Leg byes"}</h2><div class="keypad keypad-4">${runBtns([1, 2, 3, 4], "extra-run")}</div>`;
+    if (sheet.kind === "b" || sheet.kind === "lb") body = `<h2>${sheet.kind === "b" ? "Byes" : "Leg byes"}</h2><div class="keypad keypad-6">${runBtns([1, 2, 3, 4, 5, 7], "extra-run")}</div>`;
     if (sheet.kind === "more") {
       const crease = [inn.striker, inn.nonStriker].filter((p) => p != null);
       const nm = (p) => esc(name(inn.batting, p));
       const bt = (act, attrs, label, cls = "btn-ghost") => `<button class="btn ${cls}" data-act="${act}" ${attrs}>${label}</button>`;
       const fresh = crease.filter((p) => { const b = inn.batters.find((x) => x.player === p); return b && !b.balls; });
       body = `<h2>More</h2><div class="stack-s">
+        <span class="eyebrow">Other runs off the bat</span>
+        <div class="row-2">${bt("run", `data-n="5"`, "5 runs")}${bt("run", `data-n="7"`, "7 runs")}</div>
+        ${bt("run-ran", `data-n="4"`, "4 runs, all run (not a boundary)")}
         <span class="eyebrow">Batters</span>
         ${crease.map((p) => bt("retire", `data-p="${p}"`, `Retire ${nm(p)} (hurt)`)).join("")}
         ${crease.map((p) => bt("dismiss", `data-p="${p}" data-k="retiredout"`, `Retired out: ${nm(p)}`)).join("")}
@@ -432,9 +441,20 @@
         ${bt("penalty", `data-to="bat"`, `+5 penalty runs to ${esc(t[inn.batting].name)}`)}
         ${bt("penalty", `data-to="bowl"`, `+5 penalty runs to ${esc(t[inn.bowling].name)}`)}
         <span class="eyebrow">Match</span>
+        ${inn.superOver ? "" : bt("sheet", `data-k="overs"`, "Rain: cut overs / revised target")}
+        ${bt("abandon", "", "Call off: no result")}
         <button class="btn" data-act="handover">Hand over scoring to someone else</button>
         ${rec.match.cloud ? "" : `<button class="btn btn-ghost" data-act="backup-link">Send a backup link</button>`}
         <button class="btn btn-danger" data-act="end-innings">End this innings now</button></div>`;
+    }
+    if (sheet.kind === "overs") {
+      // Overs cut (rain). For a chase the scorer can enter a revised target worked out by the umpires/DLS.
+      const left = Math.ceil(inn.legalBalls / rules().ballsPerOver);
+      body = `<h2>Cut overs</h2><p class="muted">${inn.second ? "Overs for this chase, and the revised target if the umpires set one." : "New overs per side. The chase gets the same unless you change it then."}</p>
+        <div class="stack-s"><label class="field"><span>Overs this innings (now ${E.oversOf(rec.match, inn)})</span><input id="cut-overs" type="number" inputmode="numeric" min="${Math.max(1, left)}" value="${E.oversOf(rec.match, inn)}"></label>
+        ${inn.second ? `<label class="field"><span>Revised target (blank = ${s.innings[0].runs + 1})</span><input id="cut-target" type="number" inputmode="numeric" min="1" value="${inn.target != null ? inn.target : ""}"></label>` : ""}
+        <p class="error" id="cut-error" hidden></p>
+        <button class="btn btn-primary btn-big" data-act="cut-overs">Save</button></div>`;
     }
     if (sheet.kind === "chbowl") {
       // The rest of this over goes to another bowler (not the one who bowled the last over).
@@ -469,6 +489,7 @@
         ${inn.freeHit ? `<p class="muted">Free hit: only run out, obstructing the field or hit the ball twice.</p>` : ""}
         <div class="chips">${kinds.map((k) => chip("o-kind", k, f.wk, E.WICKET_KINDS[k])).join("")}</div>
         ${EITHER_BATTER.includes(f.wk) ? `<span class="eyebrow">Who is out?</span><div class="chips">${chip("o-who", String(inn.striker), String(who), esc(name(inn.batting, inn.striker)))}${chip("o-who", String(inn.nonStriker), String(who), esc(name(inn.batting, inn.nonStriker)))}</div>` : ""}
+        ${EITHER_BATTER.includes(f.wk) ? `<span class="eyebrow">New batter comes in at</span><div class="chips">${chip("o-end", "", f.end || "", "Where they ran to")}${chip("o-end", "striker", f.end || "", "Striker's end")}${chip("o-end", "nonstriker", f.end || "", "Non-striker's end")}</div>` : ""}
         ${f.wk === "runout" ? `          <span class="eyebrow">Runs completed before the run-out</span><div class="chips">${[0, 1, 2, 3].map((n) => chip("o-runs", String(n), String(f.runs), String(n))).join("")}</div>
           ${f.delivery !== "wd" && f.runs ? `<span class="eyebrow">Those runs were</span><div class="chips">${chip("o-by", "bat", f.by, "Off the bat")}${chip("o-by", "b", f.by, "Byes")}${chip("o-by", "lb", f.by, "Leg byes")}</div>` : ""}` : ""}
         ${needsFielder ? `<label class="field"><span>${f.wk === "stumped" ? "Keeper" : "Fielder"}</span><select id="o-fielder"><option value="">Not sure</option>${t[inn.bowling].players.map((p, i) => `<option value="${i}" ${String(i) === f.fielder ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>` : ""}
@@ -478,7 +499,7 @@
 
   // Fixing a ball scored earlier: change what kind of ball it was and the runs, or remove it.
   // The wicket on a ball stays as it was; to take a wicket away, remove the ball.
-  const FIX_RUNS = { legal: [0, 1, 2, 3, 4, 5, 6], wd: [0, 1, 2, 3, 4], nb: [0, 1, 2, 3, 4, 6], b: [1, 2, 3, 4], lb: [1, 2, 3, 4], nbb: [1, 2, 3, 4], nblb: [1, 2, 3, 4] };
+  const FIX_RUNS = { legal: [0, 1, 2, 3, 4, 5, 6, 7], wd: [0, 1, 2, 3, 4], nb: [0, 1, 2, 3, 4, 5, 6], b: [1, 2, 3, 4, 5, 7], lb: [1, 2, 3, 4, 5, 7], nbb: [1, 2, 3, 4, 5], nblb: [1, 2, 3, 4, 5] };
   const FIX_LABEL = { legal: "Fair ball", wd: "Wide", nb: "No ball", b: "Byes", lb: "Leg byes", nbb: "No ball + byes", nblb: "No ball + leg byes" };
   // "nbb" and "nblb" are a no-ball whose runs were byes or leg byes (event extra "nb" with bye "b"/"lb").
   const deliveryOf = (e) => (e.extra === "nb" && (e.bye === "b" || e.bye === "lb") ? "nb" + e.bye : e.extra || "legal");
@@ -530,7 +551,7 @@
   // A fan's match page under the live score: the same tabs, with ball-by-ball commentary first.
   function fanTabs(s) {
     const t = rec.match.teams, sec = view.fsec || "live";
-    const played = s.innings.filter((i) => i.batters.length);
+    const played = E.allInnings(s).filter((i) => i.batters.length);
     const nav = `<nav class="sec-tabs fan-tabs" role="tablist">${FAN_SECTIONS.map(([k, label]) => `<button class="sec-tab ${k === sec ? "on" : ""}" role="tab" aria-selected="${k === sec}" data-act="fsec" data-s="${k}">${label}</button>`).join("")}</nav>`;
     let body;
     if (sec === "live") body = commentaryTab(s);
@@ -539,7 +560,7 @@
     else if (!played.length) body = `<p class="empty">No balls bowled yet.</p>`;
     else {
       const tab = Math.min(view.itab == null ? played.length - 1 : view.itab, played.length - 1), inn = played[tab];
-      const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
+      const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${i.superOver ? "SO " : ""}${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
       body = tabs + (sec === "overs" ? oversTab(inn) : scorecardTab(inn));
     }
     return nav + `<div class="stack fan-body">${body}</div>`;
@@ -566,7 +587,7 @@
 
   function cardView() {
     const s = st(), t = rec.match.teams;
-    const played = s.innings.filter((i) => i.batters.length);
+    const played = E.allInnings(s).filter((i) => i.batters.length);
     const tab = Math.min(view.tab, Math.max(0, played.length - 1));
     const inn = played[tab], sec = view.sec || "card";
     const head = `<header class="bar"><button class="icon-btn" data-act="back-score" aria-label="Back">←</button><h1>${esc(t[0].short)} <em>v</em> ${esc(t[1].short)}</h1></header>
@@ -576,7 +597,7 @@
     if (sec === "live") return head + `<section class="wrap stack">${result}${commentaryTab(s)}</section>`;
     if (sec === "mvp") return head + `<section class="wrap stack">${result}${mvpTab(s)}</section>`;
     if (!inn) return head + `<p class="empty wrap">No balls bowled yet.</p>`;
-    const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
+    const tabs = played.length > 1 ? `<div class="tabs">${played.map((i, n) => `<button class="tab ${n === tab ? "on" : ""}" data-act="tab" data-n="${n}">${i.superOver ? "SO " : ""}${esc(t[i.batting].short)} ${i.runs}/${i.wickets}</button>`).join("")}</div>` : "";
     return head + `<section class="wrap stack">${result}${tabs}${sec === "overs" ? oversTab(inn) : scorecardTab(inn)}${sec === "card" ? CSA.ui.cardExtra(rec) : ""}</section>`;
   }
 
@@ -680,6 +701,7 @@
     "overs-custom"() { setup.custom = true; render(); },
     toss(d) { setup.tossWinner = +d.i; render(); },
     decision(d) { setup.decision = d.d; render(); },
+    xr(d) { extrasRules.pick(setup.xr, d); render(); },
     start: startMatch,
     card() { closeSheet(); view = { screen: "card", tab: st().current, sec: "card" }; render(); },
     sec(d) { view.sec = d.s; render(); window.scrollTo(0, 0); },
@@ -702,13 +724,13 @@
     "pick-bowler"(d) { push({ t: "bowler", bowler: +d.p }); },
     retire(d) { push({ t: "retire", player: +d.p }); },
     dismiss(d) {
-      const who = name(st().innings[st().current].batting, +d.p);
+      const who = name(st().live.batting, +d.p);
       const what = { retiredout: "Retired out", timedout: "Timed out", runout: "Run out before the ball was bowled (not a ball of the over)" }[d.k];
       if (confirm(`${what}: ${who}? It counts as a wicket.`)) push({ t: "dismiss", kind: d.k, player: +d.p });
     },
     "mid-bowler"(d) { push({ t: "bowler", bowler: +d.p, mid: true }); },
     penalty(d) {
-      const inn = st().innings[st().current], team = rec.match.teams[d.to === "bowl" ? inn.bowling : inn.batting].name;
+      const inn = st().live, team = rec.match.teams[d.to === "bowl" ? inn.bowling : inn.batting].name;
       if (confirm(`Give 5 penalty runs to ${team}?`)) push({ t: "penalty", to: d.to, runs: 5 });
     },
     "end-innings"() { if (confirm("End this innings now? You can undo it.")) push({ t: "end", reason: "Innings ended by scorer" }); },
@@ -760,8 +782,22 @@
     "o-who"(d) { sheet.who = +d.v; renderSheet(); },
     "o-runs"(d) { sheet.runs = +d.v; renderSheet(); },
     "o-by"(d) { sheet.by = d.v; renderSheet(); },
+    "o-end"(d) { sheet.end = d.v; renderSheet(); },
+    "run-ran"(d) { push({ t: "ball", runs: +d.n, ran: true }); },
+    abandon() { if (confirm("Call this match off with no result? You can undo it.")) push({ t: "abandon", text: "No result" }); },
+    "super-over"() { if (confirm("Start a super over? The side that batted second bats first.")) push({ t: "superover" }); },
+    "cut-overs"() {
+      const inn = st().live, o = parseInt(document.getElementById("cut-overs").value, 10);
+      const tEl = document.getElementById("cut-target"), tg = tEl && tEl.value !== "" ? parseInt(tEl.value, 10) : null;
+      const err = document.getElementById("cut-error");
+      if (!(o >= 1) || o * rules().ballsPerOver < inn.legalBalls) { err.textContent = "Overs can't be fewer than already bowled."; err.hidden = false; return; }
+      if (tg != null && !(tg >= 1)) { err.textContent = "Target must be 1 or more."; err.hidden = false; return; }
+      const e = { t: "overs", overs: o };
+      if (inn.second && tg != null) e.target = tg;
+      push(e);
+    },
     "confirm-out"() {
-      const s = st(), inn = s.innings[s.current], f = sheet;
+      const s = st(), inn = s.live, f = sheet;
       const sel = document.getElementById("o-fielder");
       const fielder = sel && sel.value !== "" ? +sel.value : null;
       const runout = f.wk === "runout";
@@ -772,6 +808,7 @@
       let extra = f.delivery === "legal" ? undefined : f.delivery, bye;
       if (by !== "bat") { if (extra === "nb") bye = by; else extra = by; }
       const e = { t: "ball", runs, extra, wicket: { kind: f.wk, player, fielder } };
+      if (f.end && EITHER_BATTER.includes(f.wk)) e.wicket.newEnd = f.end;
       if (bye) e.bye = bye;
       push(e);
     },
@@ -805,7 +842,27 @@
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && sheet) closeSheet(); });
 
   // Shared with league.js, which adds accounts, tournaments and syncing on top of these screens.
+  // Extras rules for a match: wide and no-ball runs and the free hit. Local leagues differ
+  // (some give 2 for a no-ball, some play no free hit), so the scorer picks them at the start.
+  const extrasRules = {
+    key: (id) => "csa.extrasRules" + (id ? "." + id : ""),
+    load(id) {
+      const d = { wideRuns: 1, noBallRuns: 1, freeHit: true };
+      try { return Object.assign(d, JSON.parse(localStorage.getItem(this.key(id)) || "{}")); } catch (e) { return d; }
+    },
+    save(id, xr) { try { localStorage.setItem(this.key(id), JSON.stringify(xr)); } catch (e) { /* private mode */ } },
+    pick(xr, d) { xr[d.k] = d.k === "freeHit" ? d.v === "1" : +d.v; },
+    html(xr, act) {
+      const c = (k, v, label) => `<button class="chip ${String(xr[k] === true ? 1 : xr[k] === false ? 0 : xr[k]) === v ? "on" : ""}" data-act="${act}" data-k="${k}" data-v="${v}">${label}</button>`;
+      return `<fieldset class="card stack-s"><legend class="eyebrow">Extras</legend>
+        <span class="muted">Wide</span><div class="chips">${c("wideRuns", "1", "1 run")}${c("wideRuns", "0", "No run, ball again")}</div>
+        <span class="muted">No ball</span><div class="chips">${c("noBallRuns", "1", "1 run")}${c("noBallRuns", "2", "2 runs")}</div>
+        <span class="muted">Free hit after a no ball</span><div class="chips">${c("freeHit", "1", "Yes")}${c("freeHit", "0", "No")}</div></fieldset>`;
+    },
+  };
+
   CSA.ui = {
+    extrasRules,
     esc, toast, shortName, PRESETS, actions, render, APP, BRAND, localMatches, installBanner,
     screens: {},
     tabbar: () => "",
