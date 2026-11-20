@@ -23,6 +23,7 @@
     else if (b.extra === "nb") t = hit === 4 ? "no ball, and FOUR" : hit === 6 ? "no ball, and SIX" : hit ? `no ball, ${plural(hit, "run")}` : "no ball";
     else if (b.extra === "b") t = plural(b.runs, "bye");
     else if (b.extra === "lb") t = plural(b.runs, "leg bye");
+    else if (b.ran && hit) t = `${plural(hit, "run")}, all run`;
     else if (hit === 4) t = pick(FOUR, i);
     else if (hit === 6) t = pick(SIX, i);
     else if (hit === 0) t = b.wicket ? "" : pick(DOT, i);
@@ -42,8 +43,8 @@
   function kindOf(b) {
     if (b.wicket) return "w";
     if (b.extra === "wd" || b.extra === "nb") return "x";
-    if (!b.extra && b.hit === 4) return "4";
-    if (!b.extra && b.hit === 6) return "6";
+    if (!b.extra && !b.ran && b.hit === 4) return "4";
+    if (!b.extra && !b.ran && b.hit === 6) return "6";
     return b.runs ? "r" : "0";
   }
 
@@ -59,7 +60,7 @@
       if (!milestones.has(m.index)) milestones.set(m.index, []);
       milestones.get(m.index).push(m);
     }
-    return s.innings.map((inn, n) => {
+    return E.allInnings(s).map((inn, n) => {
       const name = (team, p) => (p == null ? "" : t[team].players[p]);
       const items = [];
       const bowl = new Map(), crease = new Map();
@@ -103,9 +104,9 @@
       });
       if (inn.closed) {
         const reason = inn.closeReason === "Target reached" && s.result ? s.result.text : inn.closeReason;
-        items.push({ k: "end", text: `${t[inn.batting].name} ${inn.runs}-${inn.wickets} (${E.oversText(inn.legalBalls, bpo)} ov) · ${reason}` });
+        items.push({ k: "end", text: `${inn.superOver ? "Super over: " : ""}${t[inn.batting].name} ${inn.runs}-${inn.wickets} (${E.oversText(inn.legalBalls, bpo)} ov) · ${reason}` });
       }
-      return { n, batting: inn.batting, items: items.reverse() };
+      return { n, batting: inn.batting, superOver: inn.superOver, items: items.reverse() };
     }).reverse();
   }
 
@@ -116,14 +117,15 @@
   // h changes whenever any ball changes, so fans only download the balls when it does.
   function snapshot(match, s, events) {
     const rules = E.settings(match), bpo = rules.ballsPerOver, t = match.teams;
-    const inn = s.innings[s.current], ch = E.chase(match, s), json = JSON.stringify(events);
+    const inn = s.live, ch = E.chase(match, s), json = JSON.stringify(events);
     let h = 5381;
     for (let i = 0; i < json.length; i++) h = ((h * 33) ^ json.charCodeAt(i)) >>> 0;
     const out = { v: 1, n: events.length, h: h.toString(36), bpo,
       inn: s.innings.filter((x) => x.batters.length || x === s.innings[0]).map((x) => ({ team: x.batting, r: x.runs, w: x.wickets, b: x.legalBalls })) };
     if (s.result) out.line = s.result.text;
+    else if (inn.superOver) out.line = `Super over · ${t[inn.batting].short} ${inn.runs}-${inn.wickets}${ch ? `, need ${ch.need} off ${ch.ballsLeft}` : ""}`;
     else if (ch && inn.batters.length) out.line = `${t[inn.batting].short} need ${ch.need} off ${ch.ballsLeft}`;
-    else if (s.current === 1) out.line = `Innings break · ${t[inn.batting].short} need ${s.innings[0].runs + 1}`;
+    else if (s.current === 1) out.line = `Innings break · ${t[inn.batting].short} need ${ch ? ch.target : s.innings[0].runs + 1}`;
     else if (match.toss) out.line = `${t[match.toss.winner].short} chose to ${match.toss.decision}`;
     const over = inn.overs[inn.overs.length - 1] || [];
     if (!s.result && over.length) out.last = over.map((b) => b.label).join(" ");
@@ -148,9 +150,10 @@
       list.push({ ev: "milestone", key: `m:${m.kind}:${m.team}:${m.player}`, title: `${who} ${MS[m.kind]}`,
         body: `${m.wickets != null ? `${m.wickets}/${m.runs}` : `${m.runs} (${m.balls})`} · ${label}` });
     }
-    if (s.innings[0].closed && !s.result) {
-      list.push({ ev: "innings", key: "inn", title: `Innings break: ${score(s.innings[0])}`, body: `${t[s.innings[1].batting].name} need ${s.innings[0].runs + 1} to win · ${label}` });
+    if (s.innings[0].closed && !s.result && !s.supers.length) {
+      list.push({ ev: "innings", key: "inn", title: `Innings break: ${score(s.innings[0])}`, body: `${t[s.innings[1].batting].name} need ${E.targetOf(s, s.innings[1])} to win · ${label}` });
     }
+    if (s.supers.length && !s.result && recent(events.length - 1)) list.push({ ev: "innings", key: `so:${s.supers.length}`, title: "Super over!", body: `${label} is tied. Super over under way.` });
     if (s.result) list.push({ ev: "result", key: "result", title: s.result.text, body: s.innings.map(score).join(" · ") });
     return list;
   }

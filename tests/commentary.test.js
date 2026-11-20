@@ -100,3 +100,13 @@ test("run out before the ball reads as such and doesn't take a ball number", () 
   assert.equal(items[0].text, "OUT! Run out before the ball was bowled");
   assert.equal(items[0].n, "0.2");
 });
+
+test("super over balls show in commentary and the live line", () => {
+  const m = { teams: [team("Tigers"), team("Lions")], battingFirst: 0, rules: { oversPerSide: 1, maxOversPerBowler: 1 } };
+  const six = Array.from({ length: 6 }, () => ball(1));
+  const ev = [...start, ...six, { t: "openers", striker: 0, nonStriker: 1, bowler: 0 }, ...six, { t: "superover" }, { t: "openers", striker: 2, nonStriker: 3, bowler: 4 }, ball(4)];
+  const s = E.replay(m, ev);
+  const groups = C.build(m, s);
+  assert.equal(groups[0].superOver, 1);
+  assert.match(C.snapshot(m, s, ev).line, /^Super over · LIO 4-0/);
+});

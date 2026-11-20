@@ -150,7 +150,7 @@
   const feedTeams = new Map();
   async function loadFeed() {
     const cols = "id, tournament_id, team1_id, team2_id, status, result_text, winner_team_id, summary, stage, created_at, tournaments(name, short_name)";
-    const q = (c) => sb.from("matches").select(c).in("status", ["live", "done"]).order("created_at", { ascending: false }).limit(12);
+    const q = (c) => sb.from("matches").select(c).in("status", ["live", "done", "abandoned"]).order("created_at", { ascending: false }).limit(12);
     // The live score column comes with migration 0014; without it the feed still loads.
     let { data, error } = await q(L.noLive ? cols : cols + ", live");
     if (error && /live/.test(error.message || "")) { L.noLive = true; ({ data, error } = await q(cols)); }
@@ -578,7 +578,7 @@
       const rows = T.matches.map((m) => {
         const a = teamById(m.team1_id), b = teamById(m.team2_id);
         const when = m.starts_at ? new Date(m.starts_at).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "Date not set";
-        const pill = m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" ? `<span class="pill pill-done">${esc(m.result_text || "Result")}</span>` : `<span class="pill">${esc(when)}</span>`;
+        const pill = m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" || m.status === "abandoned" ? `<span class="pill pill-done">${esc(m.result_text || (m.status === "abandoned" ? "Abandoned" : "Result"))}</span>` : `<span class="pill">${esc(when)}</span>`;
         return `<li><button class="t-row" data-act="m-open" data-id="${m.id}"><span class="vs">${badge(a)}<b>v</b>${badge(b)}</span>
           <span class="t-text"><b>${esc(a.short_name)} v ${esc(b.short_name)}</b><small>${esc([m.stage !== "group" ? STAGE_LABEL[m.stage] || "" : "", m.venue].filter(Boolean).join(" · ") || (m.match_no ? "Match " + m.match_no : ""))}</small>${pill}</span></button></li>`;
       }).join("");
@@ -707,7 +707,7 @@
       return `<span class="ko-side ${won ? "won" : ""} ${lost ? "lost" : ""}">${badge(tm)}<b>${esc(tm.short_name)}</b><span class="ko-score">${inn ? `${inn.runs}/${inn.wickets}` : ""}</span></span>`;
     };
     const col = ([label, ms]) => `<div class="ko-round"><h3 class="eyebrow">${label}</h3>${ms.map((m) => `<button class="ko-match" data-act="m-open" data-id="${m.id}">
-        ${side(m, 0)}${side(m, 1)}<small>${m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" ? esc(m.result_text || "") : m.starts_at ? esc(new Date(m.starts_at).toLocaleDateString([], { day: "numeric", month: "short" })) : "Date not set"}</small></button>`).join("")}</div>`;
+        ${side(m, 0)}${side(m, 1)}<small>${m.status === "live" ? `<span class="pill pill-live">LIVE</span>` : m.status === "done" || m.status === "abandoned" ? esc(m.result_text || (m.status === "abandoned" ? "Abandoned" : "")) : m.starts_at ? esc(new Date(m.starts_at).toLocaleDateString([], { day: "numeric", month: "short" })) : "Date not set"}</small></button>`).join("")}</div>`;
     return `<h2 class="eyebrow">Knockouts</h2><div class="ko">${rounds.map(col).join("")}</div>`;
   }
 
@@ -890,6 +890,7 @@
       if (!canScore()) return ui.toast("This match hasn't started yet.");
       return startForm(m);
     }
+    if (m.status === "abandoned" && !m.lineups) return ui.toast(m.result_text || "This match was abandoned.");
     await watchMatch(m);
   }
 
@@ -936,7 +937,7 @@
   }
 
   async function startForm(m) {
-    L.forms.mstart = { match: m, loading: true, toss: 0, decision: "bat" };
+    L.forms.mstart = { match: m, loading: true, toss: 0, decision: "bat", xr: ui.extrasRules.load(m.tournament_id) };
     ui.go("mstart");
     const { data, error } = await sb.from("team_players").select("team_id, joined_at, players(id, full_name)").in("team_id", [m.team1_id, m.team2_id]).order("joined_at");
     const f = L.forms.mstart;
@@ -962,15 +963,18 @@
         <div class="chips">${teams.map((t, i) => `<button class="chip ${f.toss === i ? "on" : ""}" data-act="ms-toss" data-i="${i}">${esc(t.name)}</button>`).join("")}</div>
         <div class="chips"><button class="chip ${f.decision === "bat" ? "on" : ""}" data-act="ms-dec" data-d="bat">Chose to bat</button><button class="chip ${f.decision === "bowl" ? "on" : ""}" data-act="ms-dec" data-d="bowl">Chose to bowl</button></div>
       </fieldset>
+      ${ui.extrasRules.html(f.xr, "ms-xr")}
       ${status(f)}
-      <button class="btn btn-primary btn-big" data-act="ms-start" ${f.busy ? "disabled" : ""}>${f.busy ? "Starting…" : "Start scoring"}</button></section>`;
+      <button class="btn btn-primary btn-big" data-act="ms-start" ${f.busy ? "disabled" : ""}>${f.busy ? "Starting…" : "Start scoring"}</button>
+      <button class="btn btn-ghost" data-act="ms-abandon" ${f.busy ? "disabled" : ""}>Called off without a ball bowled</button></section>`;
   };
 
   async function startMatch() {
     const f = L.forms.mstart, m = f.match;
     const lineups = f.squads.map((sq, i) => sq.filter((_, j) => f.picked[i][j]));
     if (lineups.some((x) => x.length < 2)) { f.error = "Each team needs at least 2 players."; return ui.render(); }
-    const rules = rulesOf(L.tour.t);
+    const rules = Object.assign(rulesOf(L.tour.t), f.xr);
+    ui.extrasRules.save(m.tournament_id, f.xr);
     const battingFirst = f.decision === "bat" ? f.toss : 1 - f.toss;
     const toss = { winner: f.toss, decision: f.decision };
     f.busy = true; f.error = ""; ui.render();
@@ -1055,9 +1059,12 @@
 
   // The match columns a sync sets: the result (sent every time, since a fixed ball can change
   // the margin or the winner), the summary the points table and leaders read, and the live score.
+  // A match called off (no result) is stored as abandoned: the table gives 1 point each.
+  function statusOf(s) { return s.result ? (s.result.noResult ? "abandoned" : "done") : "live"; }
+
   function matchUpdate(rec, s, ev) {
     const upd = {
-      status: s.result ? "done" : "live",
+      status: statusOf(s),
       result_text: s.result ? s.result.text : null,
       winner_team_id: s.result && s.result.winner != null ? rec.match.cloud.teamIds[s.result.winner] : null,
     };
@@ -1129,7 +1136,7 @@
       const { error } = await sb.from("match_events").upsert(rows, { onConflict: "match_id,seq" });
       if (error) throw error;
     }
-    const s = E.replay(rec.match, ev), status = s.result ? "done" : "live";
+    const s = E.replay(rec.match, ev), status = statusOf(s);
     const statusChanged = status !== rec.cloudStatus;
     const resultText = s.result ? s.result.text : null;
     if (statusChanged || (s.result && resultText !== rec.cloudResult)) {
@@ -1334,6 +1341,19 @@
     "ms-toss"(d) { L.forms.mstart.toss = +d.i; ui.render(); },
     "ms-dec"(d) { L.forms.mstart.decision = d.d; ui.render(); },
     "ms-start": startMatch,
+    "ms-xr"(d) { ui.extrasRules.pick(L.forms.mstart.xr, d); ui.render(); },
+    async "ms-abandon"() {
+      const f = L.forms.mstart, m = f.match;
+      if (!confirm("Mark this match abandoned with no play? Both teams get 1 point.")) return;
+      f.busy = true; ui.render();
+      const upd = { status: "abandoned", result_text: "Match abandoned without a ball bowled", winner_team_id: null };
+      const { error } = await sb.from("matches").update(upd).eq("id", m.id);
+      f.busy = false;
+      if (error) { f.error = errText(error); return ui.render(); }
+      Object.assign(m, upd);
+      L.forms.mstart = null;
+      openTour(L.tour.id, "matches");
+    },
     "match-back"() {
       const rec = ui.current();
       if (rec && rec.match.cloud) openTour(rec.match.cloud.tournamentId, "matches");
