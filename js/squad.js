@@ -106,7 +106,7 @@
       <div class="card stack-s">
         ${field("Team name", `<input data-f="teamedit.name" value="${esc(f.name)}" maxlength="60">`)}
         ${field("Short name", `<input data-f="teamedit.short" value="${esc(f.short)}" maxlength="5">`)}
-        ${fromTour() ? field("Group", `<input data-f="teamedit.group" value="${esc(f.group || "")}" maxlength="10" placeholder="e.g. A">`) : ""}
+        ${fromTour() ? lg.groupField("teamedit", f.group) : ""}
         ${field("Captain", `<select data-f="teamedit.captain"><option value="">None</option>${S.team.players.map((p) => `<option value="${p.id}" ${p.id === f.captain ? "selected" : ""}>${esc(p.full_name)}</option>`).join("")}</select>`)}
       </div>
       <div class="card stack-s"><span class="eyebrow">Logo and colours</span>${logoPicker(f, "teamedit")}${colorPair(f, "teamedit")}</div>
