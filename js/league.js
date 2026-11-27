@@ -3,8 +3,8 @@
 (function () {
   const ui = CSA.ui, E = CSA.engine, S = CSA.store, cfg = CSA.config || {};
   const esc = ui.esc;
-  // A password-reset email link lands here as #access_token=…&type=recovery (or #error=… when it
-  // has expired). Read it before the Supabase client clears it from the address bar.
+  // A password-reset email link lands here as #access_token=…&type=recovery, a sign-up
+  // confirmation link as …&type=signup (or #error=… when either has expired). Read it before the Supabase client clears it from the address bar.
   const landing = location.hash;
   const sb = window.supabase && cfg.supabaseUrl ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
   if (!sb) return;
@@ -70,11 +70,20 @@
     if (ev === "PASSWORD_RECOVERY") startRecovery();
   });
   if (/type=recovery/.test(landing)) startRecovery();
+  else if (/type=(signup|email)\b/.test(landing)) {
+    // Opened the confirmation link: the email is real and they are now signed in.
+    setTimeout(() => {
+      if (/access_token=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+      ui.toast("Email confirmed. Welcome!");
+      ui.lastTab = "profile";
+      ui.go("profile");
+    }, 600);
+  }
   else if (/error_code=/.test(landing) && /#error=|&error=/.test(landing)) {
-    // An old or already-used reset link: send them back to ask for a new one.
+    // An old or already-used email link (reset or confirmation): say so on the sign-in screen.
     history.replaceState(null, "", location.pathname + location.search);
     setTimeout(() => {
-      Object.assign(form("account", {}), { mode: "forgot", error: "That reset link has expired or was already used. Ask for a new one below." });
+      Object.assign(form("account", {}), { mode: "in", error: "That email link has expired or was already used. Sign in to get a new confirmation link, or tap Forgot password." });
       ui.go("account");
     }, 300);
   }
@@ -216,6 +225,18 @@
       </form>
       <button class="link-btn" data-act="auth-mode" data-m="in">Back to sign in</button></section>`;
     }
+    if (f.mode === "check") {
+      return bar("Confirm your email", "auth-back") + `<section class="wrap stack">
+      <div class="card stack-s">
+        <b>Check your inbox</b>
+        <p>We sent a confirmation link to <b>${esc(f.sentTo || f.email || "")}</b>. Open it to finish creating your account. Then you can sign in.</p>
+        <p class="muted small">Not there? Look in Spam or Promotions. The link only works for a real email you can open.</p>
+        ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        <button class="btn" data-act="auth-resend" ${f.busy ? "disabled" : ""}>${f.busy ? "Sending…" : "Send the link again"}</button>
+      </div>
+      <div class="row-between"><button class="link-btn" data-act="auth-mode" data-m="in">Back to sign in</button>
+      <button class="link-btn" data-act="auth-mode" data-m="up">Wrong email?</button></div></section>`;
+    }
     return bar(up ? "Create account" : "Sign in") + `<section class="wrap stack">
       <div class="chips"><button class="chip ${up ? "" : "on"}" data-act="auth-mode" data-m="in">Sign in</button><button class="chip ${up ? "on" : ""}" data-act="auth-mode" data-m="up">Create account</button></div>
       ${googleOk() ? `<button class="btn btn-big btn-google" data-act="auth-google"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>Continue with Google</button>
@@ -225,6 +246,8 @@
         ${field("Email", `<input id="auth-email" data-f="account.email" type="email" value="${esc(f.email || "")}" autocomplete="email" required>`)}
         ${field("Password", `<input id="auth-pass" data-f="account.pass" type="password" minlength="6" autocomplete="${up ? "new-password" : "current-password"}" required>`)}
         ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        ${f.suggest ? `<button class="btn btn-small" type="button" data-act="auth-suggest">Use ${esc(f.suggest)}</button>` : ""}
+        ${f.unconfirmed ? `<button class="btn btn-small" type="button" data-act="auth-resend">Send the confirmation link again</button>` : ""}
         <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Please wait…" : up ? "Create account" : "Sign in"}</button>
       </form>
       ${up ? "" : `<button class="link-btn" data-act="auth-mode" data-m="forgot">Forgot password?</button>`}</section>`;
@@ -259,13 +282,28 @@
     if (wasRecovering) ui.go("home"); else ui.render();
   }
 
+  // Where email links (confirmation, reset) come back to. In the APK they open in the phone's browser.
+  const emailBack = () => (/^https?:/.test(location.origin) ? location.origin + location.pathname : cfg.siteUrl);
+
+  async function resendConfirm() {
+    const f = form("account", {});
+    const email = (f.sentTo || f.email || "").trim();
+    if (!email) { f.error = "Enter your email first."; return ui.render(); }
+    f.busy = true; f.error = ""; f.note = ""; ui.render();
+    const { error } = await sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: emailBack() } });
+    f.busy = false;
+    if (error) f.error = /rate|seconds|too many/i.test(error.message) ? "Wait a minute before asking for another link." : errText(error);
+    else { f.unconfirmed = false; f.note = "Sent again. Check your inbox and spam folder."; }
+    ui.render();
+  }
+
   async function submitForgot() {
     const f = form("account", {});
     f.email = ((document.getElementById("forgot-email") || {}).value || f.email || "").trim();
     if (!f.email) { f.error = "Enter your email."; return ui.render(); }
     f.busy = true; f.error = ""; f.note = ""; ui.render();
     // The link comes back to this web address (in the APK it opens in the phone's browser).
-    const back = /^https?:/.test(location.origin) ? location.origin + location.pathname : cfg.siteUrl;
+    const back = emailBack();
     const { error } = await sb.auth.resetPasswordForEmail(f.email, back ? { redirectTo: back } : {});
     f.busy = false;
     if (error) {
@@ -295,14 +333,32 @@
     const f = form("account"), up = f.mode === "up";
     f.email = (document.getElementById("auth-email") || {}).value || f.email;
     f.pass = (document.getElementById("auth-pass") || {}).value || f.pass;
+    f.suggest = ""; f.unconfirmed = false;
     if (!f.email || !f.pass) { f.error = "Enter your email and a password."; return ui.render(); }
+    f.email = f.email.trim();
+    if (up) {
+      const chk = CSA.emailCheck ? CSA.emailCheck.check(f.email) : { ok: true };
+      if (!chk.ok) { f.error = chk.error; f.suggest = chk.suggest || ""; return ui.render(); }
+      if (f.pass.length < 6) { f.error = "Use at least 6 characters for the password."; return ui.render(); }
+    }
     f.busy = true; f.error = ""; f.note = ""; ui.render();
     const res = up
-      ? await sb.auth.signUp({ email: f.email.trim(), password: f.pass, options: { data: { full_name: (f.name || "").trim() } } })
-      : await sb.auth.signInWithPassword({ email: f.email.trim(), password: f.pass });
+      ? await sb.auth.signUp({ email: f.email, password: f.pass, options: { data: { full_name: (f.name || "").trim() }, emailRedirectTo: emailBack() } })
+      : await sb.auth.signInWithPassword({ email: f.email, password: f.pass });
     f.busy = false; f.pass = "";
-    if (res.error) { f.error = res.error.message; return ui.render(); }
-    if (!res.data.session) { f.note = "Account created. Check your email for a confirmation link, then sign in."; f.mode = "in"; return ui.render(); }
+    if (res.error) {
+      if (/not confirmed/i.test(res.error.message)) { f.error = "Confirm your email first. Open the link we sent you, then sign in."; f.unconfirmed = true; }
+      else if (/already registered|already exists/i.test(res.error.message)) f.error = "An account already uses this email. Sign in, or tap Forgot password.";
+      else if (/rate|seconds|too many/i.test(res.error.message)) f.error = "Too many tries. Wait a minute, then try again.";
+      else f.error = res.error.message;
+      return ui.render();
+    }
+    // With email confirmation on, Supabase answers a sign-up for an email that already has an
+    // account with a user that has no identities (and sends nothing).
+    if (up && res.data.user && Array.isArray(res.data.user.identities) && !res.data.user.identities.length) {
+      f.mode = "in"; f.error = "An account already uses this email. Sign in, or tap Forgot password."; return ui.render();
+    }
+    if (!res.data.session) { f.sentTo = f.email; f.mode = "check"; return ui.render(); }
     L.forms.account = null;
     ui.toast(up ? "Welcome! Set up your player profile." : "Signed in");
     // A new account goes straight to setting up the player profile.
@@ -1267,8 +1323,10 @@
 
   Object.assign(ui.actions, {
     account() { ui.go("account"); },
-    "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; ui.render(); },
-    "auth-back"() { const f = form("account"); if (f.mode === "forgot") { f.mode = "in"; f.error = ""; f.note = ""; ui.render(); } else ui.actions.home(); },
+    "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; f.suggest = ""; f.unconfirmed = false; ui.render(); },
+    "auth-resend": resendConfirm,
+    "auth-suggest"() { const f = form("account"); f.email = f.suggest; f.suggest = ""; f.error = ""; ui.render(); },
+    "auth-back"() { const f = form("account"); if (f.mode === "forgot" || f.mode === "check") { f.mode = "in"; f.error = ""; f.note = ""; ui.render(); } else ui.actions.home(); },
     "newpass-open"() { L.forms.newpass = { open: true }; ui.render(); },
     "newpass-cancel"() { L.forms.newpass = {}; ui.render(); },
     async "sign-out"() { await sb.auth.signOut(); ui.toast("Signed out"); ui.go("home"); },
