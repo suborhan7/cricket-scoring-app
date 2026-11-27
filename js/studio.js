@@ -229,7 +229,7 @@
     d.urls.teams = tms.map((t) => url("logos", t.logo_path));
     const caps = await captainPhotos(tms.map((t) => t.id)).catch(() => new Map());
     d.urls.caps = tms.map((t) => caps.get(t.id) || "");
-    return { kind: "versus", data: d, title: `${tms[0].short_name} v ${tms[1].short_name}` };
+    return { kind: "versus", data: d, title: `${tms[0].short_name} v ${tms[1].short_name}`, matchId: m.id };
   }
 
   // A team's last results, oldest first: W, L, T (tie) or N (no result).
@@ -708,6 +708,21 @@
       ${custom ? `<button class="chip" data-act="card-photo-reset">Use profile photo</button>` : ""}</div></div>`;
   }
 
+  // Match announcement card: the organiser sets the date, time and ground right here and the card redraws.
+  const localInput = (iso) => { if (!iso) return ""; const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  function whenBox(c) {
+    if (c.kind !== "versus" || !c.matchId || !L.tour || !lg.isOrganiser()) return "";
+    const m = L.tour.matches.find((x) => x.id === c.matchId);
+    if (!m || m.status !== "scheduled") return "";
+    const f = c.when || (c.when = { at: localInput(m.starts_at), venue: m.venue || "" });
+    return `<div class="card stack-s"><span class="eyebrow">Date, time and ground</span>
+      <p class="muted small">Saved to the fixture too, so the match list and match day cards show it.</p>
+      <label class="field"><span>Date and time</span><input type="datetime-local" id="vs-when" value="${esc(f.at)}"></label>
+      <label class="field"><span>Ground (optional)</span><input id="vs-venue" value="${esc(f.venue)}" maxlength="80"></label>
+      ${f.error ? `<p class="error small">${esc(f.error)}</p>` : ""}
+      <button class="btn btn-primary" data-act="card-when-save" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Save and update the card"}</button></div>`;
+  }
+
   // Sponsors on the card: the tournament's own, plus logos added here (kept on this phone). None means no sponsor section.
   function sponsorBox(c) {
     const list = c.data.sponsors || [];
@@ -728,7 +743,7 @@
         ${c.kind === "summary" ? `<div class="chips" role="group" aria-label="Colours">${C.SUMMARY_TONES.map(([v, label]) => `<button class="chip ${(c.data.sumTone || "B") === v ? "on" : ""}" data-act="card-tone" data-v="${v}">${label}</button>`).join("")}</div>` : ""}
         <div class="chips" role="group" aria-label="Size">${chip("post", "Post 4:5")}${chip("story", "Story 9:16")}</div>
         <div class="card-preview ${c.size}">${c.loading ? `<p class="muted">Drawing…</p>` : c.error ? `<p class="error">${esc(c.error)}</p>` : `<img src="${c.preview}" alt="${esc(c.title || "Card")} preview">`}</div>
-        ${photoBox(c)}${sponsorBox(c)}
+        ${whenBox(c)}${photoBox(c)}${sponsorBox(c)}
         <div class="row-2"><button class="btn btn-primary btn-big" data-act="card-share" ${c.loading ? "disabled" : ""}>Share</button><button class="btn btn-big" data-act="card-save" ${c.loading ? "disabled" : ""}>Save image</button></div>
         <label class="field"><span>Caption</span><textarea id="card-caption" rows="6">${esc(c.caption)}</textarea></label>
         <button class="btn" data-act="card-copy">Copy caption</button>
@@ -791,6 +806,25 @@
       const m = L.tour.matches.find((x) => x.id === d.id);
       const rec = m && await loadMatch(m);
       if (rec) openList(`${rec.match.teams[0].short} v ${rec.match.teams[1].short} cards`, matchCards(rec), "tour");
+    },
+    async "card-when-save"() {
+      const c = V.card, f = c.when, m = L.tour && L.tour.matches.find((x) => x.id === c.matchId);
+      if (!f || !m) return;
+      f.at = (document.getElementById("vs-when") || {}).value || "";
+      f.venue = ((document.getElementById("vs-venue") || {}).value || "").trim();
+      const at = f.at ? new Date(f.at) : null;
+      if (at && isNaN(at)) { f.error = "Pick a date and time."; return ui.render(); }
+      f.busy = true; f.error = ""; ui.render();
+      const upd = { starts_at: at ? at.toISOString() : null, venue: f.venue || null };
+      const { error } = await sb.from("matches").update(upd).eq("id", m.id);
+      f.busy = false;
+      if (error) { f.error = lg.errText(error); return ui.render(); }
+      Object.assign(m, upd);
+      const edited = currentCaption() !== c.caption;
+      Object.assign(c.data.versus, { when: whenText(m.starts_at), venue: m.venue || "" });
+      if (!edited) c.caption = C.caption(c.kind, c.data);
+      ui.toast("Saved. Card updated.");
+      draw();
     },
     "card-style"(d) { if (V.card.style !== d.v) { V.card.caption = currentCaption(); V.card.style = V.style = d.v; draw(); } },
     "card-tone"(d) { if ((V.card.data.sumTone || "B") !== d.v) { V.card.caption = currentCaption(); V.card.data.sumTone = d.v; draw(); } },
@@ -873,5 +907,11 @@
       ${fresh.length ? `<span class="cs-dot">${fresh.length}</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`;
   };
 
-  CSA.studio = { tab, show, matchCards, openAlert, careerCard };
+  // Straight from a fixture to its announcement card.
+  async function openVersus(id, back) {
+    const m = L.tour && L.tour.matches.find((x) => x.id === id);
+    if (m) show(await versusCard(L.tour, m), back || "tour");
+  }
+
+  CSA.studio = { tab, show, matchCards, openAlert, careerCard, openVersus };
 })();

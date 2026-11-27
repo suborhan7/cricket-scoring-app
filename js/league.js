@@ -643,7 +643,7 @@
           <span class="t-text"><b>${esc(a.short_name)} v ${esc(b.short_name)}</b><small>${esc([m.stage !== "group" ? STAGE_LABEL[m.stage] || "" : "", m.venue].filter(Boolean).join(" · ") || (m.match_no ? "Match " + m.match_no : ""))}</small>${pill}</span></button></li>`;
       }).join("");
       body = (rows ? `<ul class="t-list">${rows}</ul>` : `<p class="muted">No matches yet.${isOrganiser() ? (T.teams.length < 2 ? " Add at least two teams first." : " Add the first fixture.") : ""}</p>`)
-        + (isOrganiser() && T.teams.length >= 2 ? `<button class="btn btn-primary" data-act="match-new">New match</button>` : "");
+        + (isOrganiser() && T.teams.length >= 2 ? `<div class="row-2"><button class="btn btn-primary" data-act="match-new">New match</button><button class="btn" data-act="fx-open">Auto fixtures</button></div>` : "");
     }
     const edit = isOrganiser() ? `<button class="icon-btn" data-act="t-edit" aria-label="Edit tournament">${EDIT_ICON}</button>` : "";
     const share = `<button class="icon-btn" data-act="share" data-kind="t" data-id="${t.id}" data-title="${esc(t.name)}" aria-label="Share">${SHARE_ICON}</button>`;
@@ -826,6 +826,114 @@
     L.forms.groups = null;
     ui.toast(clear ? "Groups removed" : `${f.n} groups saved`);
     openTour(T.id, "teams");
+  }
+
+  // ---------- Auto fixtures: every team plays every other team in its group ----------
+
+  // Round-robin rounds by the circle method, so nobody plays twice in a row where it can be helped.
+  function rounds(ids) {
+    const a = ids.slice();
+    if (a.length < 2) return [];
+    if (a.length % 2) a.push(null);
+    const n = a.length, out = [];
+    for (let r = 0; r < n - 1; r++) {
+      const round = [];
+      for (let i = 0; i < n / 2; i++) {
+        const x = a[i], y = a[n - 1 - i];
+        if (x && y) round.push(r % 2 ? [y, x] : [x, y]);
+      }
+      out.push(round);
+      a.splice(1, 0, a.pop());
+    }
+    return out;
+  }
+
+  // The fixture list the settings would make: groups play side by side, round by round,
+  // and pairs already in the fixtures are left out.
+  function planFixtures(T, f) {
+    const groups = {};
+    for (const tm of T.teams) (groups[tm.group || ""] = groups[tm.group || ""] || []).push(tm.id);
+    const names = Object.keys(groups).sort();
+    const legs = f.legs === "2" ? 2 : 1;
+    const perGroup = names.map((g) => {
+      const rs = rounds(groups[g]);
+      return legs === 2 ? rs.concat(rs.map((r) => r.map(([x, y]) => [y, x]))) : rs;
+    });
+    const want = [];
+    const most = Math.max(0, ...perGroup.map((r) => r.length));
+    for (let r = 0; r < most; r++) for (const rs of perGroup) for (const p of rs[r] || []) want.push(p);
+    // Leave out pairs already in the list (as many times as they're already there).
+    const have = {};
+    const key = (x, y) => [x, y].sort().join("|");
+    for (const m of T.matches) if (m.stage === "group" || T.t.kind === "series") have[key(m.team1_id, m.team2_id)] = (have[key(m.team1_id, m.team2_id)] || 0) + 1;
+    const fresh = want.filter(([x, y]) => { const k = key(x, y); if (have[k]) { have[k]--; return false; } return true; });
+    return { groups: names, fresh, total: want.length };
+  }
+
+  // Dates: from the first day, a number of matches a day, a set gap between start times.
+  function fixtureTimes(f, count) {
+    if (!f.day) return Array(count).fill(null);
+    const [h, mi] = (f.time || "09:00").split(":").map(Number), per = Math.max(1, +f.per || 1), gap = Math.max(0, +f.gap || 0);
+    return Array.from({ length: count }, (_, i) => {
+      const d = new Date(`${f.day}T00:00`);
+      d.setDate(d.getDate() + Math.floor(i / per));
+      d.setHours(h, mi + (i % per) * gap * 60, 0, 0);
+      return d.toISOString();
+    });
+  }
+
+  const matchesText = (n, pre = "") => `${n} ${pre}match${n === 1 ? "" : "es"}`;
+
+  function openFixtures() {
+    const T = L.tour;
+    L.forms.fx = { legs: "1", day: "", time: "09:00", per: "2", gap: String(Math.max(1, Math.round((T.t.overs_per_side || 20) / 6.5 + 0.5))) };
+    ui.go("fixtures");
+  }
+
+  ui.screens.fixtures = () => {
+    const T = L.tour;
+    if (!T || !T.t) return bar("Auto fixtures") + `<p class="wrap muted">Open a tournament first.</p>`;
+    const f = form("fx", { legs: "1" }), plan = planFixtures(T, f);
+    const stage = T.t.kind === "series" ? "series" : "group";
+    const chip = (k, v, l) => `<button class="chip ${f[k] === v ? "on" : ""}" data-act="fx-set" data-k="${k}" data-v="${v}">${l}</button>`;
+    const grp = plan.groups.filter(Boolean);
+    const times = fixtureTimes(f, Math.min(plan.fresh.length, 200));
+    const list = plan.fresh.slice(0, 200).map(([x, y], i) => {
+      const a = teamById(x), b = teamById(y);
+      return `<li class="fx-row"><b>${esc(a.short_name)} v ${esc(b.short_name)}</b>${a.group ? `<small>Group ${esc(a.group)}</small>` : ""}<small>${times[i] ? esc(new Date(times[i]).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })) : "Date not set"}</small></li>`;
+    }).join("");
+    return bar("Auto fixtures", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
+      <div class="card stack-s"><p class="small">${grp.length ? `Every team plays every other team in its group (${grp.map((g) => `Group ${esc(g)}`).join(", ")}).` : `Every team plays every other team once.`}${plan.groups.includes("") && grp.length ? " Teams with no group play each other." : ""}</p>
+        <span class="eyebrow">Each pair plays</span><div class="chips">${chip("legs", "1", "Once")}${chip("legs", "2", "Twice")}</div></div>
+      <div class="card stack-s"><span class="eyebrow">Dates (optional)</span>
+        <p class="muted small">Leave it empty and set each date later on the match card.</p>
+        ${field("First match day", `<input type="date" id="fx-day" data-f="fx.day" value="${esc(f.day || "")}">`)}
+        ${f.day ? `<div class="row-2">${field("First match at", `<input type="time" id="fx-time" data-f="fx.time" value="${esc(f.time || "09:00")}">`)}${field("Matches a day", `<input type="number" id="fx-per" data-f="fx.per" min="1" max="12" inputmode="numeric" value="${esc(f.per || "2")}">`)}</div>
+        ${field("Hours between start times", `<input type="number" id="fx-gap" data-f="fx.gap" min="0" max="12" step="0.5" inputmode="decimal" value="${esc(f.gap || "3")}">`)}` : ""}</div>
+      ${plan.fresh.length ? `<h2 class="eyebrow">${matchesText(plan.fresh.length, "new ")}${plan.total > plan.fresh.length ? ` · ${plan.total - plan.fresh.length} already in the fixtures` : ""}</h2><ul class="fx-list">${list}</ul>`
+        : `<p class="note">${plan.total ? "All these matches are already in the fixtures." : "Add at least two teams (in the same group) first."}</p>`}
+      ${status(f)}
+      <button class="btn btn-primary btn-big" data-act="fx-save" ${plan.fresh.length && !f.busy ? "" : "disabled"}>${f.busy ? "Adding…" : `Add ${matchesText(plan.fresh.length)}`}</button>
+      <p class="muted small">${stage === "group" ? "Knockout matches (semi-finals, final) are added with New match once the groups are done." : ""}</p>
+    </section>`;
+  };
+
+  async function saveFixtures() {
+    const T = L.tour, f = form("fx");
+    for (const k of ["day", "time", "per", "gap"]) { const el = document.getElementById(`fx-${k}`); if (el) f[k] = el.value; }
+    const plan = planFixtures(T, f);
+    if (!plan.fresh.length) return;
+    const times = fixtureTimes(f, plan.fresh.length);
+    let no = Math.max(0, ...T.matches.map((m) => m.match_no || 0));
+    const stage = T.t.kind === "series" ? "series" : "group";
+    const rows = plan.fresh.map(([x, y], i) => ({ tournament_id: T.id, team1_id: x, team2_id: y, stage, match_no: ++no, starts_at: times[i] }));
+    f.busy = true; f.error = ""; ui.render();
+    const { error } = await sb.from("matches").insert(rows);
+    f.busy = false;
+    if (error) { f.error = errText(error); return ui.render(); }
+    L.forms.fx = null;
+    ui.toast(`${matchesText(rows.length)} added`);
+    openTour(T.id, "matches");
   }
 
   // ---------- People: organisers, scorers and media ----------
@@ -1091,7 +1199,8 @@
     const local = S.get(m.id);
     if (local && canScore() && !local.readOnly && !local.handedOver) return ui.openMatch(local);
     if (m.status === "scheduled") {
-      if (!canScore()) return ui.toast("This match hasn't started yet.");
+      // Media managers go straight to the match announcement card.
+      if (!canScore()) return L.tour.roles.length && CSA.studio ? CSA.studio.openVersus(m.id, "tour") : ui.toast("This match hasn't started yet.");
       return startForm(m);
     }
     if (m.status === "abandoned" && !m.lineups) return ui.toast(m.result_text || "This match was abandoned.");
@@ -1179,7 +1288,13 @@
       ${f.squads[i].map((p, j) => `<label class="check"><input type="checkbox" data-pick="${i}-${j}" ${f.picked[i][j] ? "checked" : full ? "disabled" : ""}> ${esc(p.full_name)}</label>`).join("") || `<p class="muted">No players in this team.</p>`}
       ${count}${left.length ? subPick(0) + subPick(1) : ""}</fieldset>`;
     };
+    const when = m.starts_at ? new Date(m.starts_at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "Date not set";
+    const promo = CSA.studio ? `<div class="card stack-s ms-promo"><span class="eyebrow">Match announcement</span>
+      <p class="small">${esc(teams[0].short_name)} v ${esc(teams[1].short_name)} · ${esc(when)}${m.venue ? ` · ${esc(m.venue)}` : ""}</p>
+      <button class="btn" data-act="ms-card">Make the match card</button>
+      <small class="muted">Set the date and time there. The tournament's sponsors go along the bottom.</small></div>` : "";
     return head + `<section class="wrap stack">
+      ${promo}
       ${squad(0)}${squad(1)}
       <fieldset class="card stack-s"><legend class="eyebrow">Toss</legend>
         <div class="chips">${teams.map((t, i) => `<button class="chip ${f.toss === i ? "on" : ""}" data-act="ms-toss" data-i="${i}">${esc(t.name)}</button>`).join("")}</div>
@@ -1585,6 +1700,10 @@
     "ms-toss"(d) { L.forms.mstart.toss = +d.i; ui.render(); },
     "ms-dec"(d) { L.forms.mstart.decision = d.d; ui.render(); },
     "ms-start": startMatch,
+    "ms-card"() { const f = L.forms.mstart; if (f && CSA.studio) CSA.studio.openVersus(f.match.id, () => { L.forms.mstart && ui.go("mstart"); }); },
+    "fx-open": openFixtures,
+    "fx-set"(d) { const f = form("fx"); f[d.k] = d.v; f.error = ""; ui.render(); },
+    "fx-save": saveFixtures,
     "ms-xr"(d) { ui.extrasRules.pick(L.forms.mstart.xr, d); ui.render(); },
     async "ms-abandon"() {
       const f = L.forms.mstart, m = f.match;
@@ -1657,6 +1776,7 @@
       });
     }
     if (t.dataset.withme) form("teamnew").withMe = t.checked;
+    if (/^fx-/.test(t.id || "") && L.forms.fx) { L.forms.fx[t.id.slice(3)] = t.value; ui.render(); }
     if (t.dataset.pick && L.forms.mstart) {
       const [i, j] = t.dataset.pick.split("-").map(Number);
       const f = L.forms.mstart;
