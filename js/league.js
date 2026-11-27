@@ -850,6 +850,7 @@
       ${mode}
       ${body}
       ${(f.mode === "pick" ? !left.length : f.drawn) && small.length ? `<p class="note">${small.map((g) => `Group ${g}`).join(" and ")} ${small.length === 1 ? "has" : "have"} only 1 team, so ${small.length === 1 ? "it" : "they"} can't play a group match. Fine if that's the plan.</p>` : ""}
+      ${T.t.kind !== "series" && ["", "groups"].includes(fmtOf(T.t).type) ? koPlanCard(T, f) : ""}
       ${T.t.kind !== "series" ? `<p class="muted small">Saving puts every group's matchups in Matches. Matches already played stay as they are.</p>` : ""}
       ${played ? `<p class="note">Group matches have already started. Moving a team changes the points tables straight away.</p>` : ""}
       ${status(f)}
@@ -857,6 +858,24 @@
       ${T.teams.some((tm) => tm.group) ? `<button class="link-btn danger-link" data-act="grp-clear">Remove all groups</button>` : ""}
     </section>`;
   };
+
+  // After the groups: where the knockouts start, and how the teams are paired.
+  function koPlanCard(T, f) {
+    const sizes = GROUP_NAMES.slice(0, f.n).map((g) => T.teams.filter((tm) => f.pick[tm.id] === g).length).filter(Boolean);
+    const min = sizes.length === f.n ? Math.min(...sizes) : Math.floor(T.teams.length / f.n);
+    const starts = koStarts(f.n, min);
+    if (!starts.length) return `<p class="muted small">With ${f.n} groups the knockouts can't make a 2, 4 or 8 team bracket. Add them yourself with New match.</p>`;
+    const fm = fmtOf(T.t);
+    if (f.go === undefined || !starts.some(([k]) => k === f.go)) f.go = starts.some(([k]) => k === fm.go) ? fm.go : (starts.find(([, st]) => st === "semi") || starts[0])[0];
+    if (!f.pairing) f.pairing = fm.pairing || "icc";
+    const example = f.n >= 2 && f.go >= 2 ? "A1 v B2, B1 v A2" : f.n >= 2 ? "A1 v B1" : "1 v 4, 2 v 3";
+    return `<div class="card stack-s"><span class="eyebrow">After the groups</span>
+      <div class="chips">${starts.map(([k, st]) => `<button class="chip ${f.go === k ? "on" : ""}" data-act="grp-go" data-k="${k}">${esc(STAGE_LABEL[st])}${st === "final" ? "" : "s"}</button>`).join("")}</div>
+      <small class="muted">Top ${f.go} of each group go through.</small>
+      <span class="eyebrow">Who plays who</span>
+      <div class="chips">${PAIRING.map(([v, l]) => `<button class="chip ${f.pairing === v ? "on" : ""}" data-act="grp-pair" data-v="${v}">${l}</button>`).join("")}</div>
+      <small class="muted">${f.pairing === "icc" ? `A group winner plays a runner-up from another group (${example}). You can still change any match.` : "You pick both teams of every knockout match when the groups are done."}</small></div>`;
+  }
 
   async function saveGroups(clear) {
     const T = L.tour, f = form("groups");
@@ -870,6 +889,11 @@
     const bad = res.find((r) => r.error);
     if (bad) { f.error = errText(bad.error); return ui.render(); }
     L.forms.groups = null;
+    if (!clear && f.go && T.t.kind !== "series" && ["", "groups"].includes(fmtOf(T.t).type)) {
+      const format = Object.assign({}, fmtOf(T.t), { type: "groups", go: f.go, pairing: f.pairing || "icc" });
+      const r = await sb.from("tournaments").update({ format }).eq("id", T.id);
+      if (!r.error) T.t.format = format;
+    }
     // Every group's matchups go straight into the fixtures. After a redraw, matchups not yet
     // played whose teams are now in different groups are taken out, and the new ones added.
     let made = 0, gone = 0;
@@ -1001,6 +1025,10 @@
     }
     return T.koQ || fmtOf(T.t).go || 2;
   }
+  // Knockout starts on offer for n groups whose smallest has `min` teams: [go per group, stage].
+  const koStarts = (n, min) => [1, 2, 4, 8].filter((k) => k <= min && KO_OF[k * n]).map((k) => [k, KO_OF[k * n]]).reverse();
+  const PAIRING = [["icc", "ICC style"], ["pick", "Organiser picks"]];
+
   // Choices that make a proper bracket: 2, 4 or 8 teams in all.
   function qualifyChoices(T) {
     const groups = groupTeams(T), min = Math.min(...groups.map(([, ids]) => ids.length));
@@ -1062,6 +1090,9 @@
     return sb.from("matches").insert(rows);
   }
 
+  // ICC style seeds, or empty slots for the organiser to fill.
+  const nrPairs = (T, k, pairing) => pairing === "pick" ? seedPairs(T, k).map(() => ["", ""]) : seedPairs(T, k);
+
   function openNextRound() {
     const T = L.tour;
     if (fmtOf(T.t).type === "knockout") {
@@ -1072,7 +1103,8 @@
     }
     const ch = qualifyChoices(T), want = qualifyCount(T);
     const k = ch.includes(want) ? want : ch.includes(2) ? 2 : ch[0];
-    L.forms.nr = { k, pairs: seedPairs(T, k) };
+    const pairing = fmtOf(T.t).pairing || "icc";
+    L.forms.nr = { k, pairing, pairs: nrPairs(T, k, pairing) };
     ui.go("nextround");
   }
 
@@ -1082,20 +1114,22 @@
     const f = form("nr", {}), groups = groupTeams(T), ch = qualifyChoices(T);
     const stage = KO_OF[f.pairs.length * 2];
     const left = T.matches.filter((m) => m.stage === "group" && !isDone(m)).length;
-    const opts = (sel) => T.teams.map((tm) => `<option value="${tm.id}" ${tm.id === sel ? "selected" : ""}>${esc(tm.name)}${tm.group ? ` (${esc(tm.group)})` : ""}</option>`).join("");
-    const used = f.pairs.flat(), dup = used.some((id, i) => used.indexOf(id) !== i);
+    const opts = (sel) => `<option value="" ${sel ? "" : "selected"}>Pick a team</option>` + T.teams.map((tm) => `<option value="${tm.id}" ${tm.id === sel ? "selected" : ""}>${esc(tm.name)}${tm.group ? ` (${esc(tm.group)})` : ""}</option>`).join("");
+    const used = f.pairs.flat().filter(Boolean), dup = used.some((id, i) => used.indexOf(id) !== i), empty = f.pairs.flat().some((x) => !x);
     return bar("Knockouts", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
       ${f.draw ? `<div class="card stack-s"><span class="eyebrow">Knockout draw</span><p class="muted small">Paired at random. Draw again, or change any team below.</p><button class="btn" data-act="nr-redraw">Draw again</button></div>` : `<div class="card stack-s"><span class="eyebrow">${groups.length > 1 ? "How many go through from each group?" : "How many go through?"}</span>
-        <div class="chips">${ch.map((k) => `<button class="chip ${f.k === k ? "on" : ""}" data-act="nr-k" data-k="${k}">${groups.length > 1 ? `Top ${k}` : `Top ${k}`}</button>`).join("")}</div>
+        <div class="chips">${ch.map((k) => { const st = KO_OF[k * groups.length]; return `<button class="chip ${f.k === k ? "on" : ""}" data-act="nr-k" data-k="${k}">${esc(STAGE_LABEL[st])}${st === "final" ? "" : "s"} · top ${k}</button>`; }).join("")}</div>
+        <span class="eyebrow">Who plays who</span>
+        <div class="chips">${PAIRING.map(([v, l]) => `<button class="chip ${f.pairing === v ? "on" : ""}" data-act="nr-pair" data-v="${v}">${l}</button>`).join("")}</div>
         <p class="muted small">${f.pairs.length * 2} teams, so the first knockout round is the ${esc((STAGE_LABEL[stage] || "").toLowerCase())}${f.pairs.length > 1 ? "s" : ""}. ${groups.length > 1 ? "Group winners play runners-up from another group." : "1st plays the lowest, 2nd the next lowest, and so on."}</p></div>`}
       ${left ? `<p class="note">${matchesText(left)} left in the group stage, so the tables may still change.</p>` : ""}
       <h2 class="eyebrow">${esc(STAGE_LABEL[stage] || "Knockouts")}${f.pairs.length > 1 ? "s" : ""}</h2>
-      <p class="muted small">Change any team if your rules pair them differently.</p>
+      <p class="muted small">${f.draw ? "" : f.pairing === "pick" ? "Pick both teams for every match." : "Change any team if your rules pair them differently."}</p>
       ${f.pairs.map(([a, b], i) => `<div class="card nr-pair"><span class="muted small">${esc(STAGE_LABEL[stage] || "Match")} ${f.pairs.length > 1 ? i + 1 : ""}</span>
         <select data-nr="${i}-0">${opts(a)}</select><b class="nr-v">v</b><select data-nr="${i}-1">${opts(b)}</select></div>`).join("")}
       ${dup ? `<p class="error small">A team is in two matches. Check the picks.</p>` : ""}
       ${status(f)}
-      <button class="btn btn-primary btn-big" data-act="nr-save" ${f.busy || dup ? "disabled" : ""}>${f.busy ? "Adding…" : `Add the ${esc((STAGE_LABEL[stage] || "match").toLowerCase())}${f.pairs.length > 1 ? "s" : ""}`}</button>
+      <button class="btn btn-primary btn-big" data-act="nr-save" ${f.busy || dup || empty ? "disabled" : ""}>${f.busy ? "Adding…" : `Add the ${esc((STAGE_LABEL[stage] || "match").toLowerCase())}${f.pairs.length > 1 ? "s" : ""}`}</button>
       <p class="muted small">When this round is done, the Matches tab offers the next one with the winners.</p>
     </section>`;
   };
@@ -1337,7 +1371,7 @@
 
   ui.screens.matchnew = () => {
     const T = L.tour, f = form("matchnew", { team1: T.teams[0].id, team2: T.teams[1].id, stage: T.t.kind === "series" ? "series" : "group" });
-    const opts = (sel) => T.teams.map((tm) => `<option value="${tm.id}" ${tm.id === sel ? "selected" : ""}>${esc(tm.name)}</option>`).join("");
+    const opts = (sel) => `<option value="" ${sel ? "" : "selected"}>Pick a team</option>` + T.teams.map((tm) => `<option value="${tm.id}" ${tm.id === sel ? "selected" : ""}>${esc(tm.name)}</option>`).join("");
     const stages = [["group", "Group"], ["quarter", "Quarter-final"], ["semi", "Semi-final"], ["final", "Final"], ["series", "Series match"], ["other", "Other"]];
     return bar("New match", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack"><div class="card stack-s">
       ${field("Team 1", `<select id="m-team1" data-f="matchnew.team1">${opts(f.team1)}</select>`)}
@@ -1352,6 +1386,7 @@
 
   async function saveMatch() {
     const f = form("matchnew");
+    if (!f.team1 || !f.team2) { f.error = "Pick both teams."; return ui.render(); }
     if (f.team1 === f.team2) { f.error = "Pick two different teams."; return ui.render(); }
     const pair = (m) => (m.team1_id === f.team1 && m.team2_id === f.team2) || (m.team1_id === f.team2 && m.team2_id === f.team1);
     const a = teamById(f.team1), b = teamById(f.team2);
@@ -1879,6 +1914,8 @@
     "grp-draw"() { const f = form("groups"); f.pick = drawGroups(L.tour.teams, f.n); f.drawn = true; f.error = ""; ui.render(); },
     "grp-put"(d) { const f = form("groups"); f.pick = Object.assign({}, f.pick, { [d.id]: d.g }); f.error = ""; ui.render(); },
     "grp-save"() { saveGroups(false); },
+    "grp-go"(d) { form("groups").go = +d.k; ui.render(); },
+    "grp-pair"(d) { form("groups").pairing = d.v; ui.render(); },
     "grp-clear"() { if (confirm("Take every team out of its group?")) saveGroups(true); },
     "team-save": saveTeam,
     "match-new"() { L.forms.matchnew = null; ui.go("matchnew"); },
@@ -1890,7 +1927,8 @@
     "ms-card"() { const f = L.forms.mstart; if (f && CSA.studio) CSA.studio.openVersus(f.match.id, () => { L.forms.mstart && ui.go("mstart"); }); },
     "fx-open": openFixtures,
     "nr-open": openNextRound,
-    "nr-k"(d) { const f = form("nr"); f.k = +d.k; L.tour.koQ = f.k; f.pairs = seedPairs(L.tour, f.k); ui.render(); },
+    "nr-k"(d) { const f = form("nr"); f.k = +d.k; L.tour.koQ = f.k; f.pairs = nrPairs(L.tour, f.k, f.pairing); ui.render(); },
+    "nr-pair"(d) { const f = form("nr"); f.pairing = d.v; f.pairs = nrPairs(L.tour, f.k, f.pairing); ui.render(); },
     "nr-save": saveNextRound,
     "nr-redraw"() { openNextRound(); },
     "nr-round": saveRound,
