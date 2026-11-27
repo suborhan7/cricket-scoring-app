@@ -465,6 +465,14 @@
       const winner = lg.teamById(final.winner_team_id);
       return { id: final.winner_team_id, result: `Beat ${loser.name} in the final`, at: final.starts_at, second: loser.id, secondResult: `Lost to ${winner.name} in the final` };
     }
+    // League only: when every match is played, the top of the table wins.
+    if (T.t.kind !== "series" && lg.fmtOf && lg.fmtOf(T.t).type === "league") {
+      if (!T.matches.length || T.matches.some((m) => m.status === "scheduled" || m.status === "live")) return null;
+      const rows = St.pointsTable(T.teams.map((t) => t.id), T.matches);
+      if (rows.length < 2 || (rows[0].pts === rows[1].pts && rows[0].nrr === rows[1].nrr)) return null;
+      const last = T.matches[T.matches.length - 1];
+      return { id: rows[0].id, result: `Top of the table with ${rows[0].pts} points`, at: last.starts_at, second: rows[1].id, secondResult: `Second in the table with ${rows[1].pts} points` };
+    }
     if (T.t.kind !== "series" || !T.matches.length || T.matches.some((m) => m.status === "scheduled" || m.status === "live")) return null;
     const wins = new Map();
     for (const m of T.matches) if (m.winner_team_id) wins.set(m.winner_team_id, (wins.get(m.winner_team_id) || 0) + 1);

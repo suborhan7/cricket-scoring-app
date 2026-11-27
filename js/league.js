@@ -463,7 +463,7 @@
   // ---------- New tournament ----------
 
   ui.screens.tnew = () => {
-    const f = form("tnew", { kind: "tournament", overs: 20, custom: false, maxBowler: 4, c1: "#0F7A45", c2: "#0E1A14" });
+    const f = form("tnew", { kind: "tournament", overs: 20, custom: false, maxBowler: 4, c1: "#0F7A45", c2: "#0E1A14", fmt: "groups", go: 2 });
     const chips = ui.PRESETS.map(([l, n]) => `<button class="chip ${!f.custom && +f.overs === n ? "on" : ""}" data-act="tnew-overs" data-n="${n}">${l}</button>`).join("");
     const editing = !!f.editId;
     // Asked on every new tournament: sponsors added here go on every card the studio makes for it.
@@ -495,11 +495,43 @@
         ${field("Max overs per bowler", `<input id="tnew-max" data-f="tnew.maxBowler" type="number" inputmode="numeric" min="1" value="${esc(f.maxBowler)}">`)}
         ${editing ? `<small class="muted">Changes apply to matches that haven't started.</small>` : ""}
       </div>
+      ${f.kind === "series" ? "" : formatCard(f)}
       ${sponsor}
       ${status(f)}
       <button class="btn btn-primary btn-big" data-act="tnew-save" ${f.busy ? "disabled" : ""}>${f.busy ? (editing ? "Saving…" : "Creating…") : editing ? "Save" : "Create"}</button>
     </section>`;
   };
+
+  // ---------- Tournament format: how the whole tournament runs, and who goes through ----------
+
+  const FORMATS = [
+    ["groups", "Groups, then knockouts", "Teams play in groups. The top teams of each group go to the knockouts."],
+    ["leagueko", "League, then knockouts", "Everyone plays everyone in one table. The top teams go to the knockouts."],
+    ["league", "League only", "Everyone plays everyone. Top of the table wins."],
+    ["knockout", "Knockouts only", "Lose once and you're out, round by round to the final."],
+  ];
+  const GO = { groups: [[1, "Top 1"], [2, "Top 2"], [4, "Top 4"]], leagueko: [[2, "Top 2 (final)"], [4, "Top 4 (semi-finals)"], [8, "Top 8 (quarter-finals)"]] };
+  const fmtOf = (t) => Object.assign({ type: "" }, (t && t.format) || {});
+
+  function formatCard(f) {
+    const type = f.fmt || "groups", go = GO[type];
+    const chip = ([v, l]) => `<button class="chip ${type === v ? "on" : ""}" data-act="tnew-fmt" data-v="${v}">${l}</button>`;
+    return `<div class="card stack-s"><span class="eyebrow">Format</span>
+      <div class="chips">${FORMATS.map(chip).join("")}</div>
+      <small class="muted">${esc(FORMATS.find(([v]) => v === type)[2])}</small>
+      ${go ? `<span class="eyebrow">${type === "groups" ? "From each group, who goes through?" : "Who goes through?"}</span>
+        <div class="chips">${go.map(([n, l]) => `<button class="chip ${+f.go === n ? "on" : ""}" data-act="tnew-go" data-n="${n}">${l}</button>`).join("")}</div>` : ""}
+      ${f.editId ? `<small class="muted">You can change this later. Matches already played stay as they are.</small>` : ""}
+    </div>`;
+  }
+
+  // Saved on its own so the rest of the tournament saves without migration 0019.
+  async function saveFormat(id, f) {
+    const type = f.fmt || "groups", format = { type };
+    if (GO[type]) format.go = GO[type].some(([n]) => n === +f.go) ? +f.go : GO[type][1][0];
+    const { error } = await sb.from("tournaments").update({ format }).eq("id", id);
+    return error ? "The format needs a database update first." : "";
+  }
 
   const cleanHandle = (h) => String(h || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -557,7 +589,7 @@
       if (f.editId) {
         const { error } = await sb.from("tournaments").update(row).eq("id", f.editId);
         if (error) throw error;
-        const spErr = await saveSponsors(f.editId, f);
+        const spErr = (await saveSponsors(f.editId, f)) || (L.tour && L.tour.t && L.tour.t.kind !== "series" ? await saveFormat(f.editId, f) : "");
         const hErr = await saveHandle(f.editId);
         if (hErr && handle) { f.busy = false; f.error = hErr; return ui.render(); }
         ui.toast(spErr ? `Saved. ${spErr}` : "Tournament saved");
@@ -570,7 +602,7 @@
       const { data, error } = await sb.from("tournaments").insert(row).select().single();
       if (error) throw error;
       const hErr = handle ? await saveHandle(data.id) : "";
-      const spErr = f.hasSponsors && (f.sponsors || []).length ? await saveSponsors(data.id, f) : "";
+      const spErr = (f.hasSponsors && (f.sponsors || []).length ? await saveSponsors(data.id, f) : "") || (f.kind !== "series" ? await saveFormat(data.id, f) : "");
       L.forms.tnew = null;
       loadMine();
       ui.toast(hErr || spErr ? `${data.name} created. ${hErr || spErr}` : `${data.name} created`);
@@ -632,7 +664,7 @@
         + (isOrganiser() ? joinRequests(T)
           + (regClosed(T.t) ? `<button class="btn btn-primary" data-act="team-new">Add team</button>`
             : `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>`)
-          + (T.t.kind !== "series" && T.teams.length >= 3 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
+          + (T.t.kind !== "series" && ["", "groups"].includes(fmtOf(T.t).type) && T.teams.length >= 3 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
           + regCard(T) : askToJoin(T));
     } else {
       const row = (m) => {
@@ -656,7 +688,7 @@
           + sec("Other matches", T.matches.filter((m) => !groupOf(m) && !["quarter", "semi", "final"].includes(m.stage)));
       } else rows = T.matches.length ? `<ul class="t-list">${T.matches.map(row).join("")}</ul>` : "";
       body = (isOrganiser() ? nextRoundBanner(T) : "") + (rows ? rows : `<p class="muted">No matches yet.${isOrganiser() ? (T.teams.length < 2 ? " Add at least two teams first." : " Add the first fixture.") : ""}</p>`)
-        + (isOrganiser() && T.teams.length >= 2 ? `<div class="row-2"><button class="btn btn-primary" data-act="match-new">New match</button><button class="btn" data-act="fx-open">Auto fixtures</button></div>` : "");
+        + (isOrganiser() && T.teams.length >= 2 ? `<div class="row-2"><button class="btn btn-primary" data-act="match-new">New match</button>${fmtOf(T.t).type === "knockout" ? "" : `<button class="btn" data-act="fx-open">Auto fixtures</button>`}</div>` : "");
     }
     const edit = isOrganiser() ? `<button class="icon-btn" data-act="t-edit" aria-label="Edit tournament">${EDIT_ICON}</button>` : "";
     const share = `<button class="icon-btn" data-act="share" data-kind="t" data-id="${t.id}" data-title="${esc(t.name)}" aria-label="Share">${SHARE_ICON}</button>`;
@@ -967,7 +999,7 @@
       const n = T.matches.filter((m) => m.stage === first).length * 2;
       return Math.max(1, Math.round(n / groups.length));
     }
-    return T.koQ || 2;
+    return T.koQ || fmtOf(T.t).go || 2;
   }
   // Choices that make a proper bracket: 2, 4 or 8 teams in all.
   function qualifyChoices(T) {
@@ -988,9 +1020,11 @@
   const winnerOf = (m) => m.winner_team_id || null;
   // What comes next: the knockouts after the groups, or the next round once one is finished.
   function nextRound(T) {
-    if (T.t.kind === "series") return null;
+    const type = fmtOf(T.t).type;
+    if (T.t.kind === "series" || type === "league") return null;
     const rounds = KO.map((k) => [k, T.matches.filter((m) => m.stage === k).sort((a, b) => (a.match_no || 0) - (b.match_no || 0) || String(a.created_at).localeCompare(String(b.created_at)))]).filter(([, ms]) => ms.length);
     if (!rounds.length) {
+      if (type === "knockout") return KO_OF[T.teams.length] ? { kind: "draw", n: T.teams.length } : T.teams.length > 1 ? { kind: "drawhand", n: T.teams.length } : null;
       const group = T.matches.filter((m) => m.stage === "group");
       if (!group.length || !qualifyChoices(T).length) return null;
       return { kind: "groups", left: group.filter((m) => !isDone(m)).length };
@@ -1009,6 +1043,9 @@
   function nextRoundBanner(T) {
     const n = nextRound(T);
     if (!n) return "";
+    if (n.kind === "draw") return `<div class="card stack-s next-card"><span class="eyebrow">Knockout draw</span><p class="small">${n.n} teams. The app pairs them at random for the ${esc(STAGE_LABEL[KO_OF[n.n]].toLowerCase())}${n.n > 2 ? "s" : ""}, and you can change any pairing.</p>
+      <button class="btn btn-primary" data-act="nr-open">Make the draw</button></div>`;
+    if (n.kind === "drawhand") return `<p class="note">Knockouts work out with 2, 4 or 8 teams. With ${n.n}, add the first round yourself with New match; after that the next rounds come here.</p>`;
     if (n.kind === "stuck") return `<p class="note">A ${esc(STAGE_LABEL[n.stage].toLowerCase())} has no winner yet (tie or no result). Play a super over, or add the next match yourself with New match.</p>`;
     if (n.kind === "round") {
       const vs = n.pairs.map(([a, b]) => `${esc(teamById(a).short_name)} v ${esc(teamById(b).short_name)}`).join(", ");
@@ -1026,8 +1063,15 @@
   }
 
   function openNextRound() {
-    const T = L.tour, ch = qualifyChoices(T);
-    const k = ch.includes(2) ? 2 : ch[0];
+    const T = L.tour;
+    if (fmtOf(T.t).type === "knockout") {
+      const ids = shuffle(T.teams.map((tm) => tm.id)), pairs = [];
+      for (let i = 0; i < ids.length; i += 2) pairs.push([ids[i], ids[i + 1]]);
+      L.forms.nr = { draw: true, pairs };
+      return ui.go("nextround");
+    }
+    const ch = qualifyChoices(T), want = qualifyCount(T);
+    const k = ch.includes(want) ? want : ch.includes(2) ? 2 : ch[0];
     L.forms.nr = { k, pairs: seedPairs(T, k) };
     ui.go("nextround");
   }
@@ -1041,9 +1085,9 @@
     const opts = (sel) => T.teams.map((tm) => `<option value="${tm.id}" ${tm.id === sel ? "selected" : ""}>${esc(tm.name)}${tm.group ? ` (${esc(tm.group)})` : ""}</option>`).join("");
     const used = f.pairs.flat(), dup = used.some((id, i) => used.indexOf(id) !== i);
     return bar("Knockouts", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
-      <div class="card stack-s"><span class="eyebrow">${groups.length > 1 ? "How many go through from each group?" : "How many go through?"}</span>
+      ${f.draw ? `<div class="card stack-s"><span class="eyebrow">Knockout draw</span><p class="muted small">Paired at random. Draw again, or change any team below.</p><button class="btn" data-act="nr-redraw">Draw again</button></div>` : `<div class="card stack-s"><span class="eyebrow">${groups.length > 1 ? "How many go through from each group?" : "How many go through?"}</span>
         <div class="chips">${ch.map((k) => `<button class="chip ${f.k === k ? "on" : ""}" data-act="nr-k" data-k="${k}">${groups.length > 1 ? `Top ${k}` : `Top ${k}`}</button>`).join("")}</div>
-        <p class="muted small">${f.pairs.length * 2} teams, so the first knockout round is the ${esc((STAGE_LABEL[stage] || "").toLowerCase())}${f.pairs.length > 1 ? "s" : ""}. Group winners play runners-up from another group.</p></div>
+        <p class="muted small">${f.pairs.length * 2} teams, so the first knockout round is the ${esc((STAGE_LABEL[stage] || "").toLowerCase())}${f.pairs.length > 1 ? "s" : ""}. ${groups.length > 1 ? "Group winners play runners-up from another group." : "1st plays the lowest, 2nd the next lowest, and so on."}</p></div>`}
       ${left ? `<p class="note">${matchesText(left)} left in the group stage, so the tables may still change.</p>` : ""}
       <h2 class="eyebrow">${esc(STAGE_LABEL[stage] || "Knockouts")}${f.pairs.length > 1 ? "s" : ""}</h2>
       <p class="muted small">Change any team if your rules pair them differently.</p>
@@ -1159,7 +1203,7 @@
       .sort((x, y) => String(x.starts_at || "").localeCompare(String(y.starts_at || ""))).slice(-5)
       .map((m) => m.status === "abandoned" ? "N" : !m.winner_team_id ? "T" : m.winner_team_id === id ? "W" : "L");
     const tables = Object.keys(groups).sort().map((g) => {
-      const rows = CSA.stats.pointsTable(groups[g], ms), q = rows.length > 2 ? Math.min(qualifyCount(T), rows.length - 1) : 0;
+      const rows = CSA.stats.pointsTable(groups[g], ms), q = rows.length > 2 && !["league", "knockout"].includes(fmtOf(T.t).type) ? Math.min(qualifyCount(T), rows.length - 1) : 0;
       const showT = rows.some((r) => r.t), showNr = rows.some((r) => r.nr), n = 3 + (showT ? 1 : 0) + (showNr ? 1 : 0);
       const cols = `--n:${n}`;
       const head = `<div class="pt-cols" style="${cols}"><span>Team</span><span>P</span><span>W</span><span>L</span>${showT ? "<span>T</span>" : ""}${showNr ? "<span>NR</span>" : ""}<span>NRR</span><span>Pts</span></div>`;
@@ -1764,6 +1808,8 @@
     "newpass-open"() { L.forms.newpass = { open: true }; ui.render(); },
     "newpass-cancel"() { L.forms.newpass = {}; ui.render(); },
     async "sign-out"() { await sb.auth.signOut(); ui.toast("Signed out"); ui.go("home"); },
+    "tnew-fmt"(d) { const f = form("tnew"); f.fmt = d.v; f.go = d.v === "groups" ? 2 : 4; ui.render(); },
+    "tnew-go"(d) { form("tnew").go = +d.n; ui.render(); },
     "tnew-kind"(d) { form("tnew").kind = d.k; ui.render(); },
     "tnew-overs"(d) { const f = form("tnew"); f.custom = false; f.overs = +d.n; f.maxBowler = Math.ceil(f.overs / 5); ui.render(); },
     "tnew-custom"() { form("tnew").custom = true; ui.render(); },
@@ -1773,7 +1819,7 @@
       const t = L.tour.t, preset = ui.PRESETS.some(([, n]) => n === t.overs_per_side);
       L.forms.tnew = { editId: t.id, kind: t.kind, name: t.name, short: t.short_name || "", c1: t.primary_color || "#0F7A45", c2: t.secondary_color || "#0E1A14", colorsEdited: true,
         logoUrl: t.logo_path ? publicUrl("logos", t.logo_path) : "", overs: t.overs_per_side, custom: !preset, maxBowler: t.max_overs_per_bowler || Math.ceil(t.overs_per_side / 5),
-        handle: t.handle || "", open: t.open_to_requests !== false,
+        handle: t.handle || "", open: t.open_to_requests !== false, fmt: fmtOf(t).type || "groups", go: fmtOf(t).go || 2,
         sponsors: sponsorsOf(t).map((sp) => ({ name: sp.name || "", path: sp.logo_path || "", url: sp.logo_path ? publicUrl("logos", sp.logo_path) : "" })) };
       L.forms.tnew.hasSponsors = L.forms.tnew.sponsors.length > 0;
       ui.go("tnew");
@@ -1846,6 +1892,7 @@
     "nr-open": openNextRound,
     "nr-k"(d) { const f = form("nr"); f.k = +d.k; L.tour.koQ = f.k; f.pairs = seedPairs(L.tour, f.k); ui.render(); },
     "nr-save": saveNextRound,
+    "nr-redraw"() { openNextRound(); },
     "nr-round": saveRound,
     "fx-set"(d) { const f = form("fx"); f[d.k] = d.v; f.error = ""; ui.render(); },
     "fx-save": saveFixtures,
@@ -1947,7 +1994,7 @@
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, sponsorsOf, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
-    openMatch, regClosed, groupField, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
+    openMatch, regClosed, groupField, fmtOf, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();
