@@ -3,8 +3,8 @@
 (function () {
   const ui = CSA.ui, E = CSA.engine, S = CSA.store, cfg = CSA.config || {};
   const esc = ui.esc;
-  // A password-reset email link lands here as #access_token=…&type=recovery (or #error=… when it
-  // has expired). Read it before the Supabase client clears it from the address bar.
+  // A password-reset email link lands here as #access_token=…&type=recovery, a sign-up
+  // confirmation link as …&type=signup (or #error=… when either has expired). Read it before the Supabase client clears it from the address bar.
   const landing = location.hash;
   const sb = window.supabase && cfg.supabaseUrl ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
   if (!sb) return;
@@ -70,11 +70,20 @@
     if (ev === "PASSWORD_RECOVERY") startRecovery();
   });
   if (/type=recovery/.test(landing)) startRecovery();
+  else if (/type=(signup|email)\b/.test(landing)) {
+    // Opened the confirmation link: the email is real and they are now signed in.
+    setTimeout(() => {
+      if (/access_token=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+      ui.toast("Email confirmed. Welcome!");
+      ui.lastTab = "profile";
+      ui.go("profile");
+    }, 600);
+  }
   else if (/error_code=/.test(landing) && /#error=|&error=/.test(landing)) {
-    // An old or already-used reset link: send them back to ask for a new one.
+    // An old or already-used email link (reset or confirmation): say so on the sign-in screen.
     history.replaceState(null, "", location.pathname + location.search);
     setTimeout(() => {
-      Object.assign(form("account", {}), { mode: "forgot", error: "That reset link has expired or was already used. Ask for a new one below." });
+      Object.assign(form("account", {}), { mode: "in", error: "That email link has expired or was already used. Sign in to get a new confirmation link, or tap Forgot password." });
       ui.go("account");
     }, 300);
   }
@@ -216,6 +225,18 @@
       </form>
       <button class="link-btn" data-act="auth-mode" data-m="in">Back to sign in</button></section>`;
     }
+    if (f.mode === "check") {
+      return bar("Confirm your email", "auth-back") + `<section class="wrap stack">
+      <div class="card stack-s">
+        <b>Check your inbox</b>
+        <p>We sent a confirmation link to <b>${esc(f.sentTo || f.email || "")}</b>. Open it to finish creating your account. Then you can sign in.</p>
+        <p class="muted small">Not there? Look in Spam or Promotions. The link only works for a real email you can open.</p>
+        ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        <button class="btn" data-act="auth-resend" ${f.busy ? "disabled" : ""}>${f.busy ? "Sending…" : "Send the link again"}</button>
+      </div>
+      <div class="row-between"><button class="link-btn" data-act="auth-mode" data-m="in">Back to sign in</button>
+      <button class="link-btn" data-act="auth-mode" data-m="up">Wrong email?</button></div></section>`;
+    }
     return bar(up ? "Create account" : "Sign in") + `<section class="wrap stack">
       <div class="chips"><button class="chip ${up ? "" : "on"}" data-act="auth-mode" data-m="in">Sign in</button><button class="chip ${up ? "on" : ""}" data-act="auth-mode" data-m="up">Create account</button></div>
       ${googleOk() ? `<button class="btn btn-big btn-google" data-act="auth-google"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>Continue with Google</button>
@@ -225,6 +246,8 @@
         ${field("Email", `<input id="auth-email" data-f="account.email" type="email" value="${esc(f.email || "")}" autocomplete="email" required>`)}
         ${field("Password", `<input id="auth-pass" data-f="account.pass" type="password" minlength="6" autocomplete="${up ? "new-password" : "current-password"}" required>`)}
         ${f.note ? `<p class="note">${esc(f.note)}</p>` : ""}${f.error ? `<p class="error">${esc(f.error)}</p>` : ""}
+        ${f.suggest ? `<button class="btn btn-small" type="button" data-act="auth-suggest">Use ${esc(f.suggest)}</button>` : ""}
+        ${f.unconfirmed ? `<button class="btn btn-small" type="button" data-act="auth-resend">Send the confirmation link again</button>` : ""}
         <button class="btn btn-primary btn-big" type="submit" ${f.busy ? "disabled" : ""}>${f.busy ? "Please wait…" : up ? "Create account" : "Sign in"}</button>
       </form>
       ${up ? "" : `<button class="link-btn" data-act="auth-mode" data-m="forgot">Forgot password?</button>`}</section>`;
@@ -259,13 +282,28 @@
     if (wasRecovering) ui.go("home"); else ui.render();
   }
 
+  // Where email links (confirmation, reset) come back to. In the APK they open in the phone's browser.
+  const emailBack = () => (/^https?:/.test(location.origin) ? location.origin + location.pathname : cfg.siteUrl);
+
+  async function resendConfirm() {
+    const f = form("account", {});
+    const email = (f.sentTo || f.email || "").trim();
+    if (!email) { f.error = "Enter your email first."; return ui.render(); }
+    f.busy = true; f.error = ""; f.note = ""; ui.render();
+    const { error } = await sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: emailBack() } });
+    f.busy = false;
+    if (error) f.error = /rate|seconds|too many/i.test(error.message) ? "Wait a minute before asking for another link." : errText(error);
+    else { f.unconfirmed = false; f.note = "Sent again. Check your inbox and spam folder."; }
+    ui.render();
+  }
+
   async function submitForgot() {
     const f = form("account", {});
     f.email = ((document.getElementById("forgot-email") || {}).value || f.email || "").trim();
     if (!f.email) { f.error = "Enter your email."; return ui.render(); }
     f.busy = true; f.error = ""; f.note = ""; ui.render();
     // The link comes back to this web address (in the APK it opens in the phone's browser).
-    const back = /^https?:/.test(location.origin) ? location.origin + location.pathname : cfg.siteUrl;
+    const back = emailBack();
     const { error } = await sb.auth.resetPasswordForEmail(f.email, back ? { redirectTo: back } : {});
     f.busy = false;
     if (error) {
@@ -295,14 +333,32 @@
     const f = form("account"), up = f.mode === "up";
     f.email = (document.getElementById("auth-email") || {}).value || f.email;
     f.pass = (document.getElementById("auth-pass") || {}).value || f.pass;
+    f.suggest = ""; f.unconfirmed = false;
     if (!f.email || !f.pass) { f.error = "Enter your email and a password."; return ui.render(); }
+    f.email = f.email.trim();
+    if (up) {
+      const chk = CSA.emailCheck ? CSA.emailCheck.check(f.email) : { ok: true };
+      if (!chk.ok) { f.error = chk.error; f.suggest = chk.suggest || ""; return ui.render(); }
+      if (f.pass.length < 6) { f.error = "Use at least 6 characters for the password."; return ui.render(); }
+    }
     f.busy = true; f.error = ""; f.note = ""; ui.render();
     const res = up
-      ? await sb.auth.signUp({ email: f.email.trim(), password: f.pass, options: { data: { full_name: (f.name || "").trim() } } })
-      : await sb.auth.signInWithPassword({ email: f.email.trim(), password: f.pass });
+      ? await sb.auth.signUp({ email: f.email, password: f.pass, options: { data: { full_name: (f.name || "").trim() }, emailRedirectTo: emailBack() } })
+      : await sb.auth.signInWithPassword({ email: f.email, password: f.pass });
     f.busy = false; f.pass = "";
-    if (res.error) { f.error = res.error.message; return ui.render(); }
-    if (!res.data.session) { f.note = "Account created. Check your email for a confirmation link, then sign in."; f.mode = "in"; return ui.render(); }
+    if (res.error) {
+      if (/not confirmed/i.test(res.error.message)) { f.error = "Confirm your email first. Open the link we sent you, then sign in."; f.unconfirmed = true; }
+      else if (/already registered|already exists/i.test(res.error.message)) f.error = "An account already uses this email. Sign in, or tap Forgot password.";
+      else if (/rate|seconds|too many/i.test(res.error.message)) f.error = "Too many tries. Wait a minute, then try again.";
+      else f.error = res.error.message;
+      return ui.render();
+    }
+    // With email confirmation on, Supabase answers a sign-up for an email that already has an
+    // account with a user that has no identities (and sends nothing).
+    if (up && res.data.user && Array.isArray(res.data.user.identities) && !res.data.user.identities.length) {
+      f.mode = "in"; f.error = "An account already uses this email. Sign in, or tap Forgot password."; return ui.render();
+    }
+    if (!res.data.session) { f.sentTo = f.email; f.mode = "check"; return ui.render(); }
     L.forms.account = null;
     ui.toast(up ? "Welcome! Set up your player profile." : "Signed in");
     // A new account goes straight to setting up the player profile.
@@ -573,7 +629,11 @@
       const names = Object.keys(groups).sort();
       body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><button class="t-row" data-act="team-open" data-id="${tm.id}">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} player${tm.count === 1 ? "" : "s"}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`).join("")
         : `<p class="muted">No teams yet.${isOrganiser() ? " Add one, or share the invite link so captains add their own team." : ""}</p>`)
-        + (isOrganiser() ? joinRequests(T) + `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>` : askToJoin(T));
+        + (isOrganiser() ? joinRequests(T)
+          + (regClosed(T.t) ? `<button class="btn btn-primary" data-act="team-new">Add team</button>`
+            : `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>`)
+          + (T.t.kind !== "series" && T.teams.length >= 4 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
+          + regCard(T) : askToJoin(T));
     } else {
       const rows = T.matches.map((m) => {
         const a = teamById(m.team1_id), b = teamById(m.team2_id);
@@ -633,11 +693,136 @@
     if (waiting.length) out += `<p class="note">Waiting for the organiser to accept ${esc(waiting.join(", "))}.</p>`;
     // Every team they run is already in or waiting, or they play for a team that's in.
     if (L.user && (runsAny ? !free.length : playing.length)) return out;
+    if (regClosed(T.t)) return out + `<p class="muted small">Team registration for ${name} is closed.</p>`;
     if (T.t.open_to_requests === false) return out + `<p class="muted small">Teams join this tournament by the organiser's invite link.</p>`;
     const another = playing.length || waiting.length;
     return out + `<div class="card stack-s join-card"><b>${another ? `Put another team in ${name}?` : `Want your team in ${name}?`}</b>
       <p class="muted small">Captains send a request, and the organiser accepts it.</p>
       <button class="btn btn-primary" data-act="tj-request">Ask to join</button></div>`;
+  }
+
+  // ---------- Team registration: open, closed, or open until a deadline (migration 0018) ----------
+
+  const regClosed = (t) => !!t && (t.registration_closed === true || (!!t.registration_deadline && new Date(t.registration_deadline) <= new Date()));
+  const whenText = (d) => d.toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  // A date as the value a datetime-local input wants, in the phone's own time.
+  const localInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+  function regCard(T) {
+    const t = T.t, f = form("reg", {});
+    const dl = t.registration_deadline ? new Date(t.registration_deadline) : null, closed = regClosed(t);
+    const line = t.registration_closed ? "Captains can't ask to join and the invite link stops working. You can still add a team yourself."
+      : closed ? `Closed on ${esc(whenText(dl))}. You can still add a team yourself.`
+      : dl ? `Captains can join until ${esc(whenText(dl))}. After that it closes by itself.`
+      : "Captains can ask to join or use the invite link. Close it when the teams are final.";
+    if (f.deadline === undefined) f.deadline = dl ? localInput(dl) : "";
+    return `<div class="card stack-s reg-card"><div class="reg-head"><span class="eyebrow">Team registration</span><span class="pill ${closed ? "pill-closed" : "pill-done"}">${closed ? "Closed" : "Open"}</span></div>
+      <p class="small">${line}</p>
+      ${closed ? `<button class="btn" data-act="reg-set" data-v="open" ${f.busy ? "disabled" : ""}>Reopen registration</button>`
+        : `<button class="btn btn-primary" data-act="reg-set" data-v="close" ${f.busy ? "disabled" : ""}>Close registration now</button>
+      ${field("Registration deadline (optional)", `<input type="datetime-local" data-f="reg.deadline" value="${esc(f.deadline || "")}">`, "No new teams after this time.")}
+      <div class="row-2"><button class="btn btn-small" data-act="reg-set" data-v="deadline" ${f.busy ? "disabled" : ""}>Save deadline</button>${dl ? `<button class="btn btn-small" data-act="reg-set" data-v="nodeadline" ${f.busy ? "disabled" : ""}>Remove deadline</button>` : ""}</div>`}
+      ${status(f)}</div>`;
+  }
+
+  async function setRegistration(v) {
+    const T = L.tour, f = form("reg");
+    let upd;
+    if (v === "close") upd = { registration_closed: true };
+    else if (v === "open") upd = { registration_closed: false, registration_deadline: null };
+    else if (v === "nodeadline") upd = { registration_deadline: null };
+    else {
+      const d = f.deadline ? new Date(f.deadline) : null;
+      if (!d || isNaN(d)) { f.error = "Pick a date and time for the deadline."; return ui.render(); }
+      if (d <= new Date()) { f.error = "The deadline has to be in the future. To stop teams now, tap Close registration now."; return ui.render(); }
+      upd = { registration_deadline: d.toISOString() };
+    }
+    f.busy = true; f.error = ""; ui.render();
+    const { data, error } = await sb.from("tournaments").update(upd).eq("id", T.id).select().single();
+    f.busy = false;
+    if (error) { f.error = /registration_/.test(error.message || "") ? "This needs a database update first. Ask the app admin." : errText(error); return ui.render(); }
+    T.t = data; L.forms.reg = null;
+    ui.toast(v === "close" ? "Team registration closed" : v === "open" ? "Team registration is open again" : v === "nodeadline" ? "Deadline removed" : `Registration closes ${whenText(new Date(data.registration_deadline))}`);
+    rerender("tour");
+  }
+
+  // ---------- Groups: a random draw, or the organiser puts each team in a group ----------
+
+  const GROUP_NAMES = "ABCDEFGH".split("");
+
+  function shuffle(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  // Deals the teams out like cards, so group sizes differ by one at most.
+  function drawGroups(teams, n) {
+    const out = {};
+    shuffle(teams).forEach((tm, i) => { out[tm.id] = GROUP_NAMES[i % n]; });
+    return out;
+  }
+
+  function openGroups() {
+    const T = L.tour;
+    const now = {};
+    for (const tm of T.teams) now[tm.id] = tm.group || "";
+    const used = new Set(Object.values(now).filter(Boolean));
+    const n = Math.max(2, Math.min(GROUP_NAMES.length, used.size || Math.min(4, Math.ceil(T.teams.length / 4))));
+    L.forms.groups = { n, mode: "draw", pick: used.size ? now : {}, drawn: used.size > 0 };
+    ui.go("groups");
+  }
+
+  ui.screens.groups = () => {
+    const T = L.tour;
+    if (!T || !T.t) return bar("Groups") + `<p class="wrap muted">Open a tournament first.</p>`;
+    const f = form("groups", { n: 2, mode: "draw", pick: {} });
+    const maxN = Math.min(GROUP_NAMES.length, Math.max(2, Math.floor(T.teams.length / 2)));
+    const names = GROUP_NAMES.slice(0, f.n);
+    const counts = Object.fromEntries(names.map((g) => [g, 0]));
+    for (const tm of T.teams) if (counts[f.pick[tm.id]] !== undefined) counts[f.pick[tm.id]]++;
+    const left = T.teams.filter((tm) => !names.includes(f.pick[tm.id]));
+    const nChips = Array.from({ length: maxN - 1 }, (_, i) => i + 2)
+      .map((k) => `<button class="chip ${f.n === k ? "on" : ""}" data-act="grp-n" data-n="${k}">${k}</button>`).join("");
+    const mode = `<div class="chips seg"><button class="chip ${f.mode === "draw" ? "on" : ""}" data-act="grp-mode" data-m="draw">Random draw</button><button class="chip ${f.mode === "pick" ? "on" : ""}" data-act="grp-mode" data-m="pick">I'll pick the groups</button></div>`;
+    let body;
+    if (f.mode === "draw") {
+      body = `<p class="muted small">The app shuffles the ${T.teams.length} teams and deals them into ${f.n} groups, so every group gets about the same number.</p>
+        <button class="btn ${f.drawn ? "" : "btn-primary"}" data-act="grp-draw">${f.drawn ? "Draw again" : "Draw the groups"}</button>`
+        + (f.drawn ? names.map((g) => `<h3 class="eyebrow">Group ${g}</h3><ul class="t-list">${T.teams.filter((tm) => f.pick[tm.id] === g)
+          .map((tm) => `<li class="t-row">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b></span></li>`).join("") || `<li class="muted small">No teams</li>`}</ul>`).join("") : "");
+    } else {
+      body = `<p class="muted small">Did the draw yourselves? Tap each team's group. ${left.length ? `${plural(left.length, "team")} still to place.` : "Every team has a group."}</p>
+        <ul class="t-list grp-list">${T.teams.map((tm) => `<li class="t-row grp-row">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b></span>
+          <span class="grp-chips">${names.map((g) => `<button class="chip chip-s ${f.pick[tm.id] === g ? "on" : ""}" data-act="grp-put" data-id="${tm.id}" data-g="${g}" aria-label="Group ${g}">${g}</button>`).join("")}</span></li>`).join("")}</ul>
+        <p class="muted small">${names.map((g) => `Group ${g}: ${counts[g]}`).join(" · ")}</p>`;
+    }
+    const played = T.matches.some((m) => m.stage === "group" && m.status !== "scheduled");
+    const ready = names.length && !left.length && names.every((g) => counts[g] > 0);
+    return bar("Groups", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
+      <div class="card stack-s"><span class="eyebrow">How many groups?</span><div class="chips">${nChips}</div></div>
+      ${mode}
+      ${body}
+      ${played ? `<p class="note">Group matches have already started. Moving a team changes the points tables straight away.</p>` : ""}
+      ${status(f)}
+      <button class="btn btn-primary btn-big" data-act="grp-save" ${ready && !f.busy ? "" : "disabled"}>${f.busy ? "Saving…" : "Save groups"}</button>
+      ${T.teams.some((tm) => tm.group) ? `<button class="link-btn danger-link" data-act="grp-clear">Remove all groups</button>` : ""}
+    </section>`;
+  };
+
+  async function saveGroups(clear) {
+    const T = L.tour, f = form("groups");
+    const names = GROUP_NAMES.slice(0, f.n);
+    const next = Object.fromEntries(T.teams.map((tm) => [tm.id, clear ? null : f.pick[tm.id]]));
+    if (!clear && T.teams.some((tm) => !names.includes(next[tm.id]))) { f.error = "Put every team in a group first."; return ui.render(); }
+    const changed = T.teams.filter((tm) => (tm.group || null) !== next[tm.id]);
+    f.busy = true; f.error = ""; ui.render();
+    const res = await Promise.all(changed.map((tm) => sb.from("tournament_teams").update({ group_name: next[tm.id] }).eq("tournament_id", T.id).eq("team_id", tm.id)));
+    f.busy = false;
+    const bad = res.find((r) => r.error);
+    if (bad) { f.error = errText(bad.error); return ui.render(); }
+    L.forms.groups = null;
+    ui.toast(clear ? "Groups removed" : `${f.n} groups saved`);
+    openTour(T.id, "teams");
   }
 
   // ---------- People: organisers, scorers and media ----------
@@ -1296,8 +1481,10 @@
 
   Object.assign(ui.actions, {
     account() { ui.go("account"); },
-    "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; ui.render(); },
-    "auth-back"() { const f = form("account"); if (f.mode === "forgot") { f.mode = "in"; f.error = ""; f.note = ""; ui.render(); } else ui.actions.home(); },
+    "auth-mode"(d) { const f = form("account"); f.mode = d.m; f.error = ""; f.note = ""; f.suggest = ""; f.unconfirmed = false; ui.render(); },
+    "auth-resend": resendConfirm,
+    "auth-suggest"() { const f = form("account"); f.email = f.suggest; f.suggest = ""; f.error = ""; ui.render(); },
+    "auth-back"() { const f = form("account"); if (f.mode === "forgot" || f.mode === "check") { f.mode = "in"; f.error = ""; f.note = ""; ui.render(); } else ui.actions.home(); },
     "newpass-open"() { L.forms.newpass = { open: true }; ui.render(); },
     "newpass-cancel"() { L.forms.newpass = {}; ui.render(); },
     async "sign-out"() { await sb.auth.signOut(); ui.toast("Signed out"); ui.go("home"); },
@@ -1363,6 +1550,14 @@
     },
     "tour-tab"(d) { L.tour.tab = d.t; ui.go("tour", { id: L.tour.id, tab: d.t }); },
     "team-new"() { L.forms.teamnew = { tourId: L.tour.id }; ui.go("teamnew"); },
+    "reg-set"(d) { setRegistration(d.v); },
+    "t-groups": openGroups,
+    "grp-n"(d) { const f = form("groups"); f.n = +d.n; f.error = ""; if (f.mode === "draw") f.pick = drawGroups(L.tour.teams, f.n), f.drawn = true; ui.render(); },
+    "grp-mode"(d) { const f = form("groups"); f.mode = d.m; f.error = ""; ui.render(); },
+    "grp-draw"() { const f = form("groups"); f.pick = drawGroups(L.tour.teams, f.n); f.drawn = true; f.error = ""; ui.render(); },
+    "grp-put"(d) { const f = form("groups"); f.pick = Object.assign({}, f.pick, { [d.id]: d.g }); f.error = ""; ui.render(); },
+    "grp-save"() { saveGroups(false); },
+    "grp-clear"() { if (confirm("Take every team out of its group?")) saveGroups(true); },
     "team-save": saveTeam,
     "match-new"() { L.forms.matchnew = null; ui.go("matchnew"); },
     "match-save": saveMatch,
@@ -1467,7 +1662,7 @@
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, sponsorsOf, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
-    openMatch, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
+    openMatch, regClosed, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();

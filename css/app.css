@@ -656,3 +656,12 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .cards-strip .cs-dot { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--turf); color: var(--on-turf); font-size: 0.75rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
 @keyframes cs-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--turf) 55%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
 @media (prefers-reduced-motion: reduce) { .cards-strip.new { animation: none; } }
+
+/* Team registration and groups (tournament Teams tab) */
+.reg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.reg-head .pill { align-self: center; }
+.pill-closed { background: var(--paper); color: var(--ball); border: 1px solid var(--ball); }
+.grp-row { gap: 10px; }
+.grp-row .t-text { min-width: 0; }
+.grp-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 55%; }
+.chip.chip-s { min-height: 36px; min-width: 36px; padding: 4px 10px; }
