@@ -672,3 +672,5 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .fx-row b { flex: 1; }
 .fx-row small { color: var(--muted); white-space: nowrap; }
 .ms-promo .btn { align-self: flex-start; }
+.mu-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 6px; }
+.mu-head h3 { margin: 0; }
