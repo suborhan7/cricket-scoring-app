@@ -909,7 +909,7 @@
         <p class="muted small">Leave it empty and set each date later on the match card.</p>
         ${field("First match day", `<input type="date" id="fx-day" data-f="fx.day" value="${esc(f.day || "")}">`)}
         ${f.day ? `<div class="row-2">${field("First match at", `<input type="time" id="fx-time" data-f="fx.time" value="${esc(f.time || "09:00")}">`)}${field("Matches a day", `<input type="number" id="fx-per" data-f="fx.per" min="1" max="12" inputmode="numeric" value="${esc(f.per || "2")}">`)}</div>
-        ${field("Hours between start times", `<input type="number" id="fx-gap" data-f="fx.gap" min="0" max="12" step="0.5" inputmode="decimal" value="${esc(f.gap || "3")}">`)}` : ""}</div>
+        <p class="muted small">Matches on the same day start ${esc(f.gap)} hours apart (from the overs a side). Change any time later on the match card.</p>` : ""}</div>
       ${plan.fresh.length ? `<h2 class="eyebrow">${matchesText(plan.fresh.length, "new ")}${plan.total > plan.fresh.length ? ` · ${plan.total - plan.fresh.length} already in the fixtures` : ""}</h2><ul class="fx-list">${list}</ul>`
         : `<p class="note">${plan.total ? "All these matches are already in the fixtures." : "Add at least two teams (in the same group) first."}</p>`}
       ${status(f)}
@@ -920,7 +920,7 @@
 
   async function saveFixtures() {
     const T = L.tour, f = form("fx");
-    for (const k of ["day", "time", "per", "gap"]) { const el = document.getElementById(`fx-${k}`); if (el) f[k] = el.value; }
+    for (const k of ["day", "time", "per"]) { const el = document.getElementById(`fx-${k}`); if (el) f[k] = el.value; }
     const plan = planFixtures(T, f);
     if (!plan.fresh.length) return;
     const times = fixtureTimes(f, plan.fresh.length);
