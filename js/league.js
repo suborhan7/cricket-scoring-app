@@ -632,7 +632,7 @@
         + (isOrganiser() ? joinRequests(T)
           + (regClosed(T.t) ? `<button class="btn btn-primary" data-act="team-new">Add team</button>`
             : `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>`)
-          + (T.t.kind !== "series" && T.teams.length >= 4 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
+          + (T.t.kind !== "series" && T.teams.length >= 3 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
           + regCard(T) : askToJoin(T));
     } else {
       const rows = T.matches.map((m) => {
@@ -776,7 +776,8 @@
     const T = L.tour;
     if (!T || !T.t) return bar("Groups") + `<p class="wrap muted">Open a tournament first.</p>`;
     const f = form("groups", { n: 2, mode: "draw", pick: {} });
-    const maxN = Math.min(GROUP_NAMES.length, Math.max(2, Math.floor(T.teams.length / 2)));
+    // The organiser decides: 2 groups up to one per team (8 at most, A to H).
+    const maxN = Math.min(GROUP_NAMES.length, Math.max(2, T.teams.length));
     const names = GROUP_NAMES.slice(0, f.n);
     const counts = Object.fromEntries(names.map((g) => [g, 0]));
     for (const tm of T.teams) if (counts[f.pick[tm.id]] !== undefined) counts[f.pick[tm.id]]++;
@@ -797,11 +798,13 @@
         <p class="muted small">${names.map((g) => `Group ${g}: ${counts[g]}`).join(" · ")}</p>`;
     }
     const played = T.matches.some((m) => m.stage === "group" && m.status !== "scheduled");
+    const small = names.filter((g) => counts[g] === 1);
     const ready = names.length && !left.length && names.every((g) => counts[g] > 0);
     return bar("Groups", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
       <div class="card stack-s"><span class="eyebrow">How many groups?</span><div class="chips">${nChips}</div></div>
       ${mode}
       ${body}
+      ${(f.mode === "pick" ? !left.length : f.drawn) && small.length ? `<p class="note">${small.map((g) => `Group ${g}`).join(" and ")} ${small.length === 1 ? "has" : "have"} only 1 team, so ${small.length === 1 ? "it" : "they"} can't play a group match. Fine if that's the plan.</p>` : ""}
       ${played ? `<p class="note">Group matches have already started. Moving a team changes the points tables straight away.</p>` : ""}
       ${status(f)}
       <button class="btn btn-primary btn-big" data-act="grp-save" ${ready && !f.busy ? "" : "disabled"}>${f.busy ? "Saving…" : "Save groups"}</button>
@@ -956,6 +959,15 @@
   // ---------- New team ----------
 
   // A team made by anyone from the Teams tab, or added to a tournament by its organiser (f.tourId).
+  // Group picker on the team forms. Only shown once the tournament has groups (made on the
+  // Groups screen), and only offers those groups, so a late team lands in a real group.
+  function groupField(name, value) {
+    const T = L.tour, used = T ? [...new Set(T.teams.map((tm) => tm.group).filter(Boolean))].sort() : [];
+    if (!used.length) return "";
+    const opts = [["", "No group"]].concat(used.map((g) => [g, `Group ${g}`]));
+    return field("Group", `<select id="${name}-group" data-f="${name}.group">${opts.map(([v, l]) => `<option value="${esc(v)}" ${(value || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`);
+  }
+
   ui.screens.teamnew = () => {
     const f = form("teamnew", {}), inTour = !!f.tourId;
     if (!f.c1) Object.assign(f, { c1: "#0F7A45", c2: "#0E1A14", withMe: !inTour });
@@ -967,7 +979,7 @@
       <div class="card stack-s">
         ${field("Team name", `<input id="team-name" data-f="teamnew.name" value="${esc(f.name || "")}" maxlength="60" placeholder="e.g. Shapla Strikers">`)}
         ${field("Short name", `<input id="team-short" data-f="teamnew.short" value="${esc(f.short || "")}" maxlength="5" placeholder="${esc(ui.shortName(f.name || "Team"))}">`)}
-        ${inTour ? field("Group (optional)", `<input id="team-group" data-f="teamnew.group" value="${esc(f.group || "")}" maxlength="10" placeholder="e.g. A">`) : ""}
+        ${inTour ? groupField("teamnew", f.group) : ""}
       </div>
       <div class="card stack-s"><span class="eyebrow">Logo and colours</span>${logoPicker(f, "teamnew")}${colorPair(f, "teamnew")}</div>
       ${me}
@@ -1019,7 +1031,8 @@
         if (joined.error) throw joined.error;
       }
       L.forms.teamnew = null;
-      ui.toast(`${name} ${inTour ? "added" : "created"}`);
+      ui.toast(inTour && players.length < XI_MIN ? `${name} added. Add ${XI_MIN - players.length} more player${XI_MIN - players.length === 1 ? "" : "s"} before match day: a playing XI needs ${XI_MIN} to ${XI_MAX}.`
+        : `${name} ${inTour ? "added" : "created"}`);
       await loadMyTeams();
       if (inTour) return openTour(f.tourId, "teams");
       if (CSA.hub && CSA.hub.afterTeamCreated(team.data.id)) return;
@@ -1047,6 +1060,12 @@
   async function saveMatch() {
     const f = form("matchnew");
     if (f.team1 === f.team2) { f.error = "Pick two different teams."; return ui.render(); }
+    const pair = (m) => (m.team1_id === f.team1 && m.team2_id === f.team2) || (m.team1_id === f.team2 && m.team2_id === f.team1);
+    const a = teamById(f.team1), b = teamById(f.team2);
+    if (f.stage === "group" && a.group && b.group && a.group !== b.group
+      && !confirm(`${a.name} is in Group ${a.group} and ${b.name} is in Group ${b.group}. Add a group match between them anyway?`)) return;
+    if (L.tour.matches.some((m) => pair(m) && m.stage === f.stage && m.status !== "abandoned")
+      && !confirm(`${a.name} v ${b.name} is already in the fixtures. Add it again?`)) return;
     f.busy = true; f.error = ""; ui.render();
     const { error } = await sb.from("matches").insert({
       tournament_id: L.tour.id, team1_id: f.team1, team2_id: f.team2, stage: f.stage,
@@ -1178,7 +1197,8 @@
     const teamName = (i) => teamById(i ? m.team2_id : m.team1_id).name;
     const bad = lineups.findIndex((x) => x.length < XI_MIN || x.length > XI_MAX);
     if (bad >= 0) {
-      const n = lineups[bad].length;
+      const n = lineups[bad].length, sq = f.squads[bad].length;
+      if (sq < XI_MIN) { f.error = `${teamName(bad)} has only ${sq} player${sq === 1 ? "" : "s"} in the squad. Add at least ${XI_MIN - sq} more on the team page, then start the match.`; return ui.render(); }
       f.error = `${teamName(bad)} has ${n} in the playing XI. Pick ${XI_MIN} to ${XI_MAX} players${n > XI_MAX ? "; the rest can be 12th and 13th men" : ""}.`;
       return ui.render();
     }
@@ -1662,7 +1682,7 @@
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, sponsorsOf, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
-    openMatch, regClosed, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
+    openMatch, regClosed, groupField, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();
