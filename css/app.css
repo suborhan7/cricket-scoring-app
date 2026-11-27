@@ -553,6 +553,7 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .squad-col { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; min-width: 0; }
 .squad-col ol { margin: 6px 0 0; padding-left: 26px; }
 .squad-col li { padding: 2px 0; overflow-wrap: anywhere; }
+.squad-subs { list-style: none; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px dashed var(--line); }
 .mvp-top .avatar { background: var(--surface); }
 
 /* Scoring screen header: a light bar with the match name, then the live card. */

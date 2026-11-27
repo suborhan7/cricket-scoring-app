@@ -31,7 +31,7 @@ jobs:
         env:
           GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          PKGS="@capacitor/cli@7 @capacitor/core@7 @capacitor/android@7 @capacitor/splash-screen@7 @capacitor/assets@3"
+          PKGS="@capacitor/cli@7 @capacitor/core@7 @capacitor/android@7 @capacitor/splash-screen@7 @capacitor/app@7 @capacitor/assets@3"
           if [ -n "$GSJ" ]; then PKGS="$PKGS @capacitor/push-notifications@7"; fi
           npm install --no-save $PKGS
       - name: Copy the web app

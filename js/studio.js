@@ -361,7 +361,7 @@
         if (wk) keeper = true;
         return { name, cap: !!id && id === caps[k], wk };
       });
-      return Object.assign({}, ctx.teams[k], { players });
+      return Object.assign({}, ctx.teams[k], { players, subs: tm.subs || [] });
     });
     const toss = match.toss && match.teams[match.toss.winner]
       ? `${match.teams[match.toss.winner].name} won the toss and chose to ${match.toss.decision === "bowl" ? "bowl" : "bat"}` : "";
@@ -588,12 +588,17 @@
     if (!m || !m.lineups) return null;
     ui.toast("Loading match…");
     const [players, events] = await Promise.all([
-      sb.from("players").select("id, full_name").in("id", [].concat(...m.lineups.teams.map((x) => x.players))),
+      sb.from("players").select("id, full_name").in("id", [].concat(...m.lineups.teams.map((x) => x.players.concat(x.subs || [])))),
       sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq"),
     ]);
     if (players.error || events.error) { ui.toast(lg.errText(players.error || events.error)); return null; }
     const names = new Map(players.data.map((p) => [p.id, p.full_name]));
-    const team = (id, i) => { const t = lg.teamById(id); return { name: t.name, short: t.short_name, players: m.lineups.teams[i].players.map((pid) => names.get(pid) || "Player") }; };
+    const team = (id, i) => {
+      const t = lg.teamById(id), x = { name: t.name, short: t.short_name, players: m.lineups.teams[i].players.map((pid) => names.get(pid) || "Player") };
+      const subs = (m.lineups.teams[i].subs || []).map((pid) => names.get(pid) || "Player");
+      if (subs.length) x.subs = subs;
+      return x;
+    };
     return {
       match: { id: m.id, teams: [team(m.team1_id, 0), team(m.team2_id, 1)], battingFirst: m.batting_first || 0, toss: m.toss, rules: m.rules,
         cloud: { matchId: m.id, tournamentId: m.tournament_id, teamIds: [m.team1_id, m.team2_id], playerIds: m.lineups.teams.map((x) => x.players) } },

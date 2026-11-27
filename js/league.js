@@ -897,7 +897,7 @@
   // Loads a match from the server: for fans to follow, or for a scorer picking it up on another phone.
   async function watchMatch(m, quiet) {
     if (!quiet) ui.toast("Loading match…");
-    const ids = [].concat(...((m.lineups && m.lineups.teams) || []).map((x) => x.players));
+    const ids = [].concat(...((m.lineups && m.lineups.teams) || []).map((x) => x.players.concat(x.subs || [])));
     // The balls come with the match's sync version in one request (migration 0017), so a
     // scorer picking the match up here can't overwrite balls saved after it loaded them.
     const oldEvents = () => sb.from("match_events").select("seq, event").eq("match_id", m.id).order("seq")
@@ -909,7 +909,8 @@
     ]);
     if (players.error || events.error) return ui.toast(errText(players.error || events.error));
     const names = new Map(players.data.map((p) => [p.id, p.full_name]));
-    const rec = buildRec(m, m.lineups.teams.map((x) => x.players.map((pid) => names.get(pid) || "Player")));
+    const rec = buildRec(m, m.lineups.teams.map((x) => x.players.map((pid) => names.get(pid) || "Player")),
+      m.lineups.teams.map((x) => (x.subs || []).map((pid) => names.get(pid) || "Player")));
     rec.events = events.data.events;
     rec.syncVersion = events.data.version;
     rec.synced = rec.events.map((e) => JSON.stringify(e));
@@ -923,8 +924,12 @@
     ui.openMatch(rec);
   }
 
-  function buildRec(m, playerNames) {
-    const team = (id, i) => { const t = teamById(id); return { name: t.name, short: t.short_name, players: playerNames[i] }; };
+  function buildRec(m, playerNames, subNames) {
+    const team = (id, i) => {
+      const t = teamById(id), x = { name: t.name, short: t.short_name, players: playerNames[i] };
+      if (subNames && subNames[i] && subNames[i].length) x.subs = subNames[i];
+      return x;
+    };
     return {
       match: {
         id: m.id, createdAt: Date.now(), teams: [team(m.team1_id, 0), team(m.team2_id, 1)],
@@ -936,6 +941,9 @@
     };
   }
 
+  // A playing XI is 9 to 11 players; up to two more sit out as the 12th and 13th men.
+  const XI_MIN = 9, XI_MAX = 11, SUB_NAMES = ["12th man", "13th man"];
+
   async function startForm(m) {
     L.forms.mstart = { match: m, loading: true, toss: 0, decision: "bat", xr: ui.extrasRules.load(m.tournament_id) };
     ui.go("mstart");
@@ -945,7 +953,9 @@
     if (error) f.error = errText(error);
     else {
       f.squads = [m.team1_id, m.team2_id].map((tid) => data.filter((r) => r.team_id === tid && r.players).map((r) => r.players));
-      f.picked = f.squads.map((sq) => sq.map(() => true));
+      // The first 11 play; the next two are the 12th and 13th men. The scorer can change both.
+      f.picked = f.squads.map((sq) => sq.map((_, j) => j < XI_MAX));
+      f.subs = f.squads.map((sq) => [XI_MAX, XI_MAX + 1].map((j) => (j < sq.length ? j : null)));
     }
     rerender("mstart");
   }
@@ -954,9 +964,17 @@
     const f = L.forms.mstart, m = f.match, teams = [teamById(m.team1_id), teamById(m.team2_id)];
     const head = bar("Start match", "t-open", `data-id="${L.tour.id}"`);
     if (f.loading) return head + `<p class="wrap muted">Loading squads…</p>`;
-    const squad = (i) => `<fieldset class="card stack-s"><legend class="eyebrow">${esc(teams[i].name)} playing</legend>
-      ${f.squads[i].map((p, j) => `<label class="check"><input type="checkbox" data-pick="${i}-${j}" ${f.picked[i][j] ? "checked" : ""}> ${esc(p.full_name)}</label>`).join("") || `<p class="muted">No players in this team.</p>`}
-      <small class="muted">${f.picked[i].filter(Boolean).length} picked</small></fieldset>`;
+    const squad = (i) => {
+      const n = f.picked[i].filter(Boolean).length, full = n >= XI_MAX;
+      const left = f.squads[i].map((p, j) => [p, j]).filter(([, j]) => !f.picked[i][j]);
+      const subPick = (k) => `<label class="field"><span>${SUB_NAMES[k]}</span><select data-sub="${i}-${k}">
+        <option value="">None</option>${left.map(([p, j]) => `<option value="${j}" ${f.subs[i][k] === j ? "selected" : ""}>${esc(p.full_name)}</option>`).join("")}</select></label>`;
+      const count = n < XI_MIN ? `<small class="error">${n} picked. Pick at least ${XI_MIN}.</small>`
+        : `<small class="muted">${n} of ${XI_MAX} picked${full ? ". Untick one to swap a player in." : ""}</small>`;
+      return `<fieldset class="card stack-s"><legend class="eyebrow">${esc(teams[i].name)} playing XI</legend>
+      ${f.squads[i].map((p, j) => `<label class="check"><input type="checkbox" data-pick="${i}-${j}" ${f.picked[i][j] ? "checked" : full ? "disabled" : ""}> ${esc(p.full_name)}</label>`).join("") || `<p class="muted">No players in this team.</p>`}
+      ${count}${left.length ? subPick(0) + subPick(1) : ""}</fieldset>`;
+    };
     return head + `<section class="wrap stack">
       ${squad(0)}${squad(1)}
       <fieldset class="card stack-s"><legend class="eyebrow">Toss</legend>
@@ -972,7 +990,18 @@
   async function startMatch() {
     const f = L.forms.mstart, m = f.match;
     const lineups = f.squads.map((sq, i) => sq.filter((_, j) => f.picked[i][j]));
-    if (lineups.some((x) => x.length < 2)) { f.error = "Each team needs at least 2 players."; return ui.render(); }
+    const teamName = (i) => teamById(i ? m.team2_id : m.team1_id).name;
+    const bad = lineups.findIndex((x) => x.length < XI_MIN || x.length > XI_MAX);
+    if (bad >= 0) {
+      const n = lineups[bad].length;
+      f.error = `${teamName(bad)} has ${n} in the playing XI. Pick ${XI_MIN} to ${XI_MAX} players${n > XI_MAX ? "; the rest can be 12th and 13th men" : ""}.`;
+      return ui.render();
+    }
+    // 12th and 13th men: not in the XI, and not picked twice.
+    const subs = f.squads.map((sq, i) => {
+      const seen = new Set();
+      return f.subs[i].filter((j) => j != null && !f.picked[i][j] && sq[j] && !seen.has(j) && seen.add(j)).map((j) => sq[j]);
+    });
     const rules = Object.assign(rulesOf(L.tour.t), f.xr);
     ui.extrasRules.save(m.tournament_id, f.xr);
     const battingFirst = f.decision === "bat" ? f.toss : 1 - f.toss;
@@ -980,12 +1009,12 @@
     f.busy = true; f.error = ""; ui.render();
     const upd = {
       status: "live", rules, toss, batting_first: battingFirst,
-      lineups: { teams: [m.team1_id, m.team2_id].map((team_id, i) => ({ team_id, players: lineups[i].map((p) => p.id) })) },
+      lineups: { teams: [m.team1_id, m.team2_id].map((team_id, i) => ({ team_id, players: lineups[i].map((p) => p.id), subs: subs[i].map((p) => p.id) })) },
     };
     const { error } = await sb.from("matches").update(upd).eq("id", m.id);
     if (error) { f.busy = false; f.error = errText(error); return ui.render(); }
     Object.assign(m, upd);
-    const rec = buildRec(m, lineups.map((x) => x.map((p) => p.full_name)));
+    const rec = buildRec(m, lineups.map((x) => x.map((p) => p.full_name)), subs.map((x) => x.map((p) => p.full_name)));
     rec.synced = []; rec.cloudStatus = "live";
     S.save(rec);
     L.forms.mstart = null;
@@ -1415,7 +1444,17 @@
     if (t.dataset.withme) form("teamnew").withMe = t.checked;
     if (t.dataset.pick && L.forms.mstart) {
       const [i, j] = t.dataset.pick.split("-").map(Number);
-      L.forms.mstart.picked[i][j] = t.checked;
+      const f = L.forms.mstart;
+      if (t.checked && f.picked[i].filter(Boolean).length >= XI_MAX) { t.checked = false; return ui.toast(`Only ${XI_MAX} can play. Untick someone first.`); }
+      f.picked[i][j] = t.checked;
+      // Someone moved into the XI can't also be the 12th or 13th man.
+      if (t.checked) f.subs[i] = f.subs[i].map((k) => (k === j ? null : k));
+      ui.render();
+    }
+    if (t.dataset.sub && L.forms.mstart) {
+      const [i, k] = t.dataset.sub.split("-").map(Number), subs = L.forms.mstart.subs[i];
+      subs[k] = t.value === "" ? null : +t.value;
+      if (subs[k] != null && subs[1 - k] === subs[k]) subs[1 - k] = null;
       ui.render();
     }
   });
