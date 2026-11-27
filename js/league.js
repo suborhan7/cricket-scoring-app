@@ -629,7 +629,11 @@
       const names = Object.keys(groups).sort();
       body = (T.teams.length ? names.map((g) => `${g ? `<h3 class="eyebrow">Group ${esc(g)}</h3>` : ""}<ul class="t-list">${groups[g].map((tm) => `<li><button class="t-row" data-act="team-open" data-id="${tm.id}">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b><small>${tm.count} player${tm.count === 1 ? "" : "s"}</small></span><span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>`).join("")
         : `<p class="muted">No teams yet.${isOrganiser() ? " Add one, or share the invite link so captains add their own team." : ""}</p>`)
-        + (isOrganiser() ? joinRequests(T) + `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>` : askToJoin(T));
+        + (isOrganiser() ? joinRequests(T)
+          + (regClosed(T.t) ? `<button class="btn btn-primary" data-act="team-new">Add team</button>`
+            : `<div class="row-2"><button class="btn btn-primary" data-act="team-new">Add team</button><button class="btn" data-act="t-invite">Invite teams</button></div>`)
+          + (T.t.kind !== "series" && T.teams.length >= 4 ? `<button class="btn" data-act="t-groups">${T.teams.some((tm) => tm.group) ? "Change groups" : "Make groups"}</button>` : "")
+          + regCard(T) : askToJoin(T));
     } else {
       const rows = T.matches.map((m) => {
         const a = teamById(m.team1_id), b = teamById(m.team2_id);
@@ -689,11 +693,136 @@
     if (waiting.length) out += `<p class="note">Waiting for the organiser to accept ${esc(waiting.join(", "))}.</p>`;
     // Every team they run is already in or waiting, or they play for a team that's in.
     if (L.user && (runsAny ? !free.length : playing.length)) return out;
+    if (regClosed(T.t)) return out + `<p class="muted small">Team registration for ${name} is closed.</p>`;
     if (T.t.open_to_requests === false) return out + `<p class="muted small">Teams join this tournament by the organiser's invite link.</p>`;
     const another = playing.length || waiting.length;
     return out + `<div class="card stack-s join-card"><b>${another ? `Put another team in ${name}?` : `Want your team in ${name}?`}</b>
       <p class="muted small">Captains send a request, and the organiser accepts it.</p>
       <button class="btn btn-primary" data-act="tj-request">Ask to join</button></div>`;
+  }
+
+  // ---------- Team registration: open, closed, or open until a deadline (migration 0018) ----------
+
+  const regClosed = (t) => !!t && (t.registration_closed === true || (!!t.registration_deadline && new Date(t.registration_deadline) <= new Date()));
+  const whenText = (d) => d.toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  // A date as the value a datetime-local input wants, in the phone's own time.
+  const localInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+  function regCard(T) {
+    const t = T.t, f = form("reg", {});
+    const dl = t.registration_deadline ? new Date(t.registration_deadline) : null, closed = regClosed(t);
+    const line = t.registration_closed ? "Captains can't ask to join and the invite link stops working. You can still add a team yourself."
+      : closed ? `Closed on ${esc(whenText(dl))}. You can still add a team yourself.`
+      : dl ? `Captains can join until ${esc(whenText(dl))}. After that it closes by itself.`
+      : "Captains can ask to join or use the invite link. Close it when the teams are final.";
+    if (f.deadline === undefined) f.deadline = dl ? localInput(dl) : "";
+    return `<div class="card stack-s reg-card"><div class="reg-head"><span class="eyebrow">Team registration</span><span class="pill ${closed ? "pill-closed" : "pill-done"}">${closed ? "Closed" : "Open"}</span></div>
+      <p class="small">${line}</p>
+      ${closed ? `<button class="btn" data-act="reg-set" data-v="open" ${f.busy ? "disabled" : ""}>Reopen registration</button>`
+        : `<button class="btn btn-primary" data-act="reg-set" data-v="close" ${f.busy ? "disabled" : ""}>Close registration now</button>
+      ${field("Registration deadline (optional)", `<input type="datetime-local" data-f="reg.deadline" value="${esc(f.deadline || "")}">`, "No new teams after this time.")}
+      <div class="row-2"><button class="btn btn-small" data-act="reg-set" data-v="deadline" ${f.busy ? "disabled" : ""}>Save deadline</button>${dl ? `<button class="btn btn-small" data-act="reg-set" data-v="nodeadline" ${f.busy ? "disabled" : ""}>Remove deadline</button>` : ""}</div>`}
+      ${status(f)}</div>`;
+  }
+
+  async function setRegistration(v) {
+    const T = L.tour, f = form("reg");
+    let upd;
+    if (v === "close") upd = { registration_closed: true };
+    else if (v === "open") upd = { registration_closed: false, registration_deadline: null };
+    else if (v === "nodeadline") upd = { registration_deadline: null };
+    else {
+      const d = f.deadline ? new Date(f.deadline) : null;
+      if (!d || isNaN(d)) { f.error = "Pick a date and time for the deadline."; return ui.render(); }
+      if (d <= new Date()) { f.error = "The deadline has to be in the future. To stop teams now, tap Close registration now."; return ui.render(); }
+      upd = { registration_deadline: d.toISOString() };
+    }
+    f.busy = true; f.error = ""; ui.render();
+    const { data, error } = await sb.from("tournaments").update(upd).eq("id", T.id).select().single();
+    f.busy = false;
+    if (error) { f.error = /registration_/.test(error.message || "") ? "This needs a database update first. Ask the app admin." : errText(error); return ui.render(); }
+    T.t = data; L.forms.reg = null;
+    ui.toast(v === "close" ? "Team registration closed" : v === "open" ? "Team registration is open again" : v === "nodeadline" ? "Deadline removed" : `Registration closes ${whenText(new Date(data.registration_deadline))}`);
+    rerender("tour");
+  }
+
+  // ---------- Groups: a random draw, or the organiser puts each team in a group ----------
+
+  const GROUP_NAMES = "ABCDEFGH".split("");
+
+  function shuffle(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  // Deals the teams out like cards, so group sizes differ by one at most.
+  function drawGroups(teams, n) {
+    const out = {};
+    shuffle(teams).forEach((tm, i) => { out[tm.id] = GROUP_NAMES[i % n]; });
+    return out;
+  }
+
+  function openGroups() {
+    const T = L.tour;
+    const now = {};
+    for (const tm of T.teams) now[tm.id] = tm.group || "";
+    const used = new Set(Object.values(now).filter(Boolean));
+    const n = Math.max(2, Math.min(GROUP_NAMES.length, used.size || Math.min(4, Math.ceil(T.teams.length / 4))));
+    L.forms.groups = { n, mode: "draw", pick: used.size ? now : {}, drawn: used.size > 0 };
+    ui.go("groups");
+  }
+
+  ui.screens.groups = () => {
+    const T = L.tour;
+    if (!T || !T.t) return bar("Groups") + `<p class="wrap muted">Open a tournament first.</p>`;
+    const f = form("groups", { n: 2, mode: "draw", pick: {} });
+    const maxN = Math.min(GROUP_NAMES.length, Math.max(2, Math.floor(T.teams.length / 2)));
+    const names = GROUP_NAMES.slice(0, f.n);
+    const counts = Object.fromEntries(names.map((g) => [g, 0]));
+    for (const tm of T.teams) if (counts[f.pick[tm.id]] !== undefined) counts[f.pick[tm.id]]++;
+    const left = T.teams.filter((tm) => !names.includes(f.pick[tm.id]));
+    const nChips = Array.from({ length: maxN - 1 }, (_, i) => i + 2)
+      .map((k) => `<button class="chip ${f.n === k ? "on" : ""}" data-act="grp-n" data-n="${k}">${k}</button>`).join("");
+    const mode = `<div class="chips seg"><button class="chip ${f.mode === "draw" ? "on" : ""}" data-act="grp-mode" data-m="draw">Random draw</button><button class="chip ${f.mode === "pick" ? "on" : ""}" data-act="grp-mode" data-m="pick">I'll pick the groups</button></div>`;
+    let body;
+    if (f.mode === "draw") {
+      body = `<p class="muted small">The app shuffles the ${T.teams.length} teams and deals them into ${f.n} groups, so every group gets about the same number.</p>
+        <button class="btn ${f.drawn ? "" : "btn-primary"}" data-act="grp-draw">${f.drawn ? "Draw again" : "Draw the groups"}</button>`
+        + (f.drawn ? names.map((g) => `<h3 class="eyebrow">Group ${g}</h3><ul class="t-list">${T.teams.filter((tm) => f.pick[tm.id] === g)
+          .map((tm) => `<li class="t-row">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b></span></li>`).join("") || `<li class="muted small">No teams</li>`}</ul>`).join("") : "");
+    } else {
+      body = `<p class="muted small">Did the draw yourselves? Tap each team's group. ${left.length ? `${plural(left.length, "team")} still to place.` : "Every team has a group."}</p>
+        <ul class="t-list grp-list">${T.teams.map((tm) => `<li class="t-row grp-row">${badge(tm)}<span class="t-text"><b>${esc(tm.name)}</b></span>
+          <span class="grp-chips">${names.map((g) => `<button class="chip chip-s ${f.pick[tm.id] === g ? "on" : ""}" data-act="grp-put" data-id="${tm.id}" data-g="${g}" aria-label="Group ${g}">${g}</button>`).join("")}</span></li>`).join("")}</ul>
+        <p class="muted small">${names.map((g) => `Group ${g}: ${counts[g]}`).join(" · ")}</p>`;
+    }
+    const played = T.matches.some((m) => m.stage === "group" && m.status !== "scheduled");
+    const ready = names.length && !left.length && names.every((g) => counts[g] > 0);
+    return bar("Groups", "t-open", `data-id="${T.id}"`) + `<section class="wrap stack">
+      <div class="card stack-s"><span class="eyebrow">How many groups?</span><div class="chips">${nChips}</div></div>
+      ${mode}
+      ${body}
+      ${played ? `<p class="note">Group matches have already started. Moving a team changes the points tables straight away.</p>` : ""}
+      ${status(f)}
+      <button class="btn btn-primary btn-big" data-act="grp-save" ${ready && !f.busy ? "" : "disabled"}>${f.busy ? "Saving…" : "Save groups"}</button>
+      ${T.teams.some((tm) => tm.group) ? `<button class="link-btn danger-link" data-act="grp-clear">Remove all groups</button>` : ""}
+    </section>`;
+  };
+
+  async function saveGroups(clear) {
+    const T = L.tour, f = form("groups");
+    const names = GROUP_NAMES.slice(0, f.n);
+    const next = Object.fromEntries(T.teams.map((tm) => [tm.id, clear ? null : f.pick[tm.id]]));
+    if (!clear && T.teams.some((tm) => !names.includes(next[tm.id]))) { f.error = "Put every team in a group first."; return ui.render(); }
+    const changed = T.teams.filter((tm) => (tm.group || null) !== next[tm.id]);
+    f.busy = true; f.error = ""; ui.render();
+    const res = await Promise.all(changed.map((tm) => sb.from("tournament_teams").update({ group_name: next[tm.id] }).eq("tournament_id", T.id).eq("team_id", tm.id)));
+    f.busy = false;
+    const bad = res.find((r) => r.error);
+    if (bad) { f.error = errText(bad.error); return ui.render(); }
+    L.forms.groups = null;
+    ui.toast(clear ? "Groups removed" : `${f.n} groups saved`);
+    openTour(T.id, "teams");
   }
 
   // ---------- People: organisers, scorers and media ----------
@@ -1392,6 +1521,14 @@
     },
     "tour-tab"(d) { L.tour.tab = d.t; ui.go("tour", { id: L.tour.id, tab: d.t }); },
     "team-new"() { L.forms.teamnew = { tourId: L.tour.id }; ui.go("teamnew"); },
+    "reg-set"(d) { setRegistration(d.v); },
+    "t-groups": openGroups,
+    "grp-n"(d) { const f = form("groups"); f.n = +d.n; f.error = ""; if (f.mode === "draw") f.pick = drawGroups(L.tour.teams, f.n), f.drawn = true; ui.render(); },
+    "grp-mode"(d) { const f = form("groups"); f.mode = d.m; f.error = ""; ui.render(); },
+    "grp-draw"() { const f = form("groups"); f.pick = drawGroups(L.tour.teams, f.n); f.drawn = true; f.error = ""; ui.render(); },
+    "grp-put"(d) { const f = form("groups"); f.pick = Object.assign({}, f.pick, { [d.id]: d.g }); f.error = ""; ui.render(); },
+    "grp-save"() { saveGroups(false); },
+    "grp-clear"() { if (confirm("Take every team out of its group?")) saveGroups(true); },
     "team-save": saveTeam,
     "match-new"() { L.forms.matchnew = null; ui.go("matchnew"); },
     "match-save": saveMatch,
@@ -1486,7 +1623,7 @@
   // Shared with squad.js (team and player pages).
   CSA.league = { sb, L, form, field, status, bar, badge, publicUrl, sponsorsOf, errText, shrink, upload, logoPicker, colorPair,
     openTour, isOrganiser, teamById, rerender, onScreen, needUser, parsePlayers, addPlayers, shareUrl, SHARE_ICON, EDIT_ICON,
-    openMatch, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
+    openMatch, regClosed, feedHtml, loadFeed, loadMine, loadMe, loadMyTeams, deleteBox, shareLink, TEAM_COLS };
 
   ui.render();
 })();
