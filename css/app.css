@@ -674,3 +674,8 @@ body.has-tabs .toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 .ms-promo .btn { align-self: flex-start; }
 .mu-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 6px; }
 .mu-head h3 { margin: 0; }
+.next-card { border-color: var(--turf); }
+.nr-pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+.nr-pair > span { grid-column: 1 / -1; }
+.nr-pair select { min-width: 0; width: 100%; border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 8px; background: var(--paper); font-weight: 600; min-height: 46px; }
+.nr-v { text-align: center; }
