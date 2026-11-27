@@ -169,7 +169,7 @@
         <legend class="eyebrow">Team ${i + 1}</legend>
         <label class="field"><span>Team name</span><input id="team${i}-name" data-bind="team${i}-name" value="${esc(f.teams[i].name)}" placeholder="e.g. Shapla Strikers" autocomplete="off"></label>
         <label class="field"><span>Players, one per line</span><textarea id="team${i}-players" data-bind="team${i}-players" rows="6" placeholder="Captain first is fine">${esc(f.teams[i].players)}</textarea></label>
-        <small class="muted">${countPlayers(f.teams[i].players)} players</small>
+        <small class="muted">${playersNote(f.teams[i].players)}</small>
       </fieldset>`;
     const chips = PRESETS.map(([l, n]) => `<button class="chip ${!f.custom && f.overs === n ? "on" : ""}" data-act="overs" data-n="${n}">${l}</button>`).join("");
     const tn = (i) => esc(f.teams[i].name || `Team ${i + 1}`);
@@ -195,13 +195,27 @@
   }
 
   function countPlayers(text) { return text.split("\n").map((s) => s.trim()).filter(Boolean).length; }
+  // Up to 11 play; names 12 and 13 on the list are the 12th and 13th men.
+  const XI_MAX = 11, SUBS_MAX = 2;
+  function playersNote(text) {
+    const n = countPlayers(text);
+    if (n > XI_MAX + SUBS_MAX) return `${n} players: too many. ${XI_MAX} play, plus up to ${SUBS_MAX} extra.`;
+    if (n > XI_MAX) return `${XI_MAX} playing · ${n - XI_MAX === 1 ? "12th man" : "12th and 13th men"}: ${n - XI_MAX}`;
+    return `${n} player${n === 1 ? "" : "s"} · up to ${XI_MAX} play; add 12th and 13th men on lines 12 and 13`;
+  }
 
   function startMatch() {
     const f = setup, err = document.getElementById("setup-error");
     const teams = f.teams.map((t, i) => {
       const nm = t.name.trim() || `Team ${i + 1}`;
-      return { name: nm, short: shortName(nm), players: t.players.split("\n").map((s) => s.trim()).filter(Boolean) };
+      const all = t.players.split("\n").map((s) => s.trim()).filter(Boolean);
+      const team = { name: nm, short: shortName(nm), players: all.slice(0, XI_MAX), all: all.length };
+      if (all.length > XI_MAX) team.subs = all.slice(XI_MAX);
+      return team;
     });
+    const many = teams.find((t) => t.all > XI_MAX + SUBS_MAX);
+    if (many) { err.textContent = `${many.name} has ${many.all} players. ${XI_MAX} play, and up to ${SUBS_MAX} more can be 12th and 13th men.`; err.hidden = false; return; }
+    teams.forEach((t) => delete t.all);
     const bad = teams.find((t) => t.players.length < 2);
     if (bad) { err.textContent = `${bad.name} needs at least 2 players.`; err.hidden = false; return; }
     if (!(f.overs >= 1)) { err.textContent = "Overs per side must be 1 or more."; err.hidden = false; return; }
@@ -650,7 +664,8 @@
     const m = rec.match, ru = rules(), t = m.teams, info = m.info || {};
     const when = info.startsAt || m.createdAt;
     const row = (k, v) => v ? `<div class="info-row"><span>${k}</span><span>${v}</span></div>` : "";
-    const squad = (i) => `<div class="squad-col"><b>${esc(t[i].name)}</b><ol>${t[i].players.map((p) => `<li>${esc(p)}</li>`).join("")}</ol></div>`;
+    const subs = (i) => (t[i].subs || []).map((p, k) => `<li class="squad-sub">${esc(p)} <small class="muted">${k ? "13th" : "12th"} man</small></li>`).join("");
+    const squad = (i) => `<div class="squad-col"><b>${esc(t[i].name)}</b><ol>${t[i].players.map((p) => `<li>${esc(p)}</li>`).join("")}</ol>${subs(i) ? `<ul class="squad-subs">${subs(i)}</ul>` : ""}</div>`;
     return `<div class="card info-card">
         ${row("Tournament", info.tournament ? esc(info.tournament) : "")}
         ${row("Match", `${esc(t[0].name)} v ${esc(t[1].name)}`)}
@@ -828,7 +843,7 @@
     const m = b.match(/^team(\d)-(name|players)$/);
     if (m) {
       setup.teams[+m[1]][m[2]] = ev.target.value;
-      if (m[2] === "players") ev.target.parentElement.nextElementSibling.textContent = `${countPlayers(ev.target.value)} players`;
+      if (m[2] === "players") ev.target.parentElement.nextElementSibling.textContent = playersNote(ev.target.value);
     }
     if (b === "overs") {
       setup.overs = parseInt(ev.target.value, 10) || 0;

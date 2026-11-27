@@ -2824,7 +2824,8 @@
     if (kind === "lineup") {
       const [a, b] = d.lineup.teams;
       tags.splice(1, 0, tag(`${a.short}v${b.short}`));
-      const xi = (t) => `${t.name}: ${t.players.map((p) => p.name + (p.cap ? " (c)" : "") + (p.wk ? " (wk)" : "")).join(", ")}`;
+      const subs = (t) => (t.subs || []).map((n, k) => `\n${k ? "13th" : "12th"} man: ${n}`).join("");
+      const xi = (t) => `${t.name}: ${t.players.map((p) => p.name + (p.cap ? " (c)" : "") + (p.wk ? " (wk)" : "")).join(", ")}${subs(t)}`;
       return `Playing XIs${d.lineup.toss ? `\n${d.lineup.toss}` : ""}\n\n${xi(a)}\n\n${xi(b)}\n\n${tags.join(" ")}`;
     }
     if (kind === "squad") {
