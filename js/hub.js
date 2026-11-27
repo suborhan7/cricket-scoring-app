@@ -476,6 +476,7 @@
     if (t.error) return ui.toast(errText(t.error));
     await lg.openTour(data, "teams");
     if (L.tour && L.tour.roles.includes("organiser")) return ui.toast("This is your own tournament's invite link.");
+    if (lg.regClosed(t.data)) return ui.toast(`Team registration for ${t.data.short_name || t.data.name} is closed.`);
     startPick("invite", t.data, p.code);
   }
 
